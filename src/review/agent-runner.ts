@@ -148,7 +148,7 @@ async function createClaudeMcpConfig(token: string): Promise<string> {
     },
   };
 
-  const tempDir = join(tmpdir(), "review-bot-mcp");
+  const tempDir = join(tmpdir(), "ironsha-mcp");
   await mkdir(tempDir, { recursive: true });
   const tempPath = join(tempDir, `mcp-config-${Date.now()}.json`);
   await writeFile(tempPath, JSON.stringify(mcpConfig, null, 2));
@@ -156,7 +156,7 @@ async function createClaudeMcpConfig(token: string): Promise<string> {
 }
 
 async function createCodexOutputPath(): Promise<string> {
-  const tempDir = join(tmpdir(), "review-bot-codex");
+  const tempDir = join(tmpdir(), "ironsha-codex");
   await mkdir(tempDir, { recursive: true });
   return join(tempDir, `output-${Date.now()}.txt`);
 }

@@ -335,7 +335,7 @@ export async function runReviewPipeline(
         pr.owner,
         pr.repo,
         pr.number,
-        `## Review Bot Error\n\nThe review pipeline encountered an error. Please check the bot logs.\n\n\`\`\`\n${String(err)}\n\`\`\`` + makeFooter(randomUUID(), reviewId),
+        `## Ironsha Error\n\nThe review pipeline encountered an error. Please check the bot logs.\n\n\`\`\`\n${String(err)}\n\`\`\`` + makeFooter(randomUUID(), reviewId),
       );
       await setLabel(octokit, pr.owner, pr.repo, pr.number, "bot-changes-needed");
     } catch (postErr) {

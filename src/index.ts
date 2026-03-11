@@ -11,7 +11,7 @@ logger.info(
     provider: config.LLM_PROVIDER,
     model: resolveProviderModel(config.LLM_PROVIDER) ?? "provider-default",
   },
-  "review-bot starting",
+  "ironsha starting",
 );
 
 startPoller(octokit);

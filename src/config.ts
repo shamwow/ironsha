@@ -57,10 +57,10 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
     MAX_REVIEW_TURNS: optionalNumericEnvFrom("MAX_REVIEW_TURNS", 30, env),
     POLL_INTERVAL_MS: optionalNumericEnvFrom("POLL_INTERVAL_MS", 60_000, env),
     REVIEW_TIMEOUT_MS: optionalNumericEnvFrom("REVIEW_TIMEOUT_MS", 600_000, env),
-    WORK_DIR: optionalEnvFrom("WORK_DIR", "/tmp/review-bot", env),
+    WORK_DIR: optionalEnvFrom("WORK_DIR", "/tmp/ironsha", env),
     TRANSCRIPT_DIR: optionalEnvFrom(
       "TRANSCRIPT_DIR",
-      "/tmp/review-bot/transcripts",
+      "/tmp/ironsha/transcripts",
       env,
     ),
     MAX_WRITE_TURNS: optionalNumericEnvFrom("MAX_WRITE_TURNS", 50, env),

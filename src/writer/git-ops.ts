@@ -106,12 +106,12 @@ export async function commitAndPush(
 ): Promise<void> {
   await execFileAsync(
     "git",
-    ["config", "user.name", "review-bot"],
+    ["config", "user.name", "ironsha"],
     { cwd: checkoutPath },
   );
   await execFileAsync(
     "git",
-    ["config", "user.email", "review-bot@noreply"],
+    ["config", "user.email", "ironsha@noreply"],
     { cwd: checkoutPath },
   );
   await execFileAsync("git", ["add", "-A"], { cwd: checkoutPath });
