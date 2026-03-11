@@ -1,10 +1,10 @@
 # Contributing LLM Compatibility Guide
 
-This file describes what a code-submitting LLM must do to participate in the review-bot workflow. Copy this file into any project that will create PRs for review-bot to review.
+This file describes what a code-submitting LLM must do to participate in the ironsha workflow. Copy this file into any project that will create PRs for ironsha to review.
 
 ## Supported Platforms
 
-The review bot supports projects using one of the following stacks, detected by file extensions in the diff:
+The ironsha supports projects using one of the following stacks, detected by file extensions in the diff:
 
 | Stack | Detected by |
 |---|---|
@@ -18,7 +18,7 @@ The review bot supports projects using one of the following stacks, detected by 
 Your repository **must** contain:
 
 ### `AGENTS.md`, `CLAUDE.md`, or `README.md`
-Must document the project's **build and test commands**. The review bot runs these before reviewing. If they fail, the PR is rejected immediately with no code review.
+Must document the project's **build and test commands**. The ironsha runs these before reviewing. If they fail, the PR is rejected immediately with no code review.
 
 Example:
 ```markdown
@@ -33,7 +33,7 @@ npm run lint
 ```
 
 ### `ARCHITECTURE.md`
-Documents the project's architecture — module structure, data flow, layer boundaries, dependency direction. The review bot reads this during the architecture review pass and checks that PRs conform to it. If your change introduces new modules or alters the architecture, update this file in the same PR.
+Documents the project's architecture — module structure, data flow, layer boundaries, dependency direction. The ironsha reads this during the architecture review pass and checks that PRs conform to it. If your change introduces new modules or alters the architecture, update this file in the same PR.
 
 ## Label-Driven Workflow
 
@@ -42,20 +42,20 @@ The entire review cycle is driven by four GitHub labels. Only one label is activ
 | Label | Applied by | Meaning |
 |---|---|---|
 | `bot-review-needed` | Code submitter / Write bot | PR is ready for review |
-| `bot-changes-needed` | Review bot | Issues found; write bot picks it up automatically |
-| `human-review-needed` | Review bot | Bot approved; awaiting human review |
+| `bot-changes-needed` | Ironsha | Issues found; write bot picks it up automatically |
+| `human-review-needed` | Ironsha | Bot approved; awaiting human review |
 | `bot-human-intervention` | Write bot | Max review cycles exceeded; needs human help |
 
 ### Lifecycle
 
-The review bot and write bot form an autonomous loop:
+The ironsha and write bot form an autonomous loop:
 
 ```
 1. Open PR against main
 2. Add label: bot-review-needed
          │
          ▼
-   Review bot picks up the PR
+   Ironsha picks up the PR
          │
     ┌────┴─────────────────────┐
     │                          │
@@ -88,7 +88,7 @@ bot-human-intervention          │
 
 The write bot automatically addresses review comments, pushes fixes, and re-triggers review. After `MAX_REVIEW_CYCLES` (default 5) iterations, it applies `bot-human-intervention` and stops.
 
-## What the Review Bot Checks
+## What the Ironsha Checks
 
 The bot runs two sequential review passes:
 
@@ -116,15 +116,15 @@ When the bot applies `bot-changes-needed`, it will have posted review comments o
 
 2. For each thread, either:
    - **Fix the issue** in a new commit and reply to the thread explaining the fix, OR
-   - **Justify why no change is needed** by replying to the thread with a clear explanation. The review bot will evaluate justifications on the next cycle and resolve threads it finds acceptable.
+   - **Justify why no change is needed** by replying to the thread with a clear explanation. The ironsha will evaluate justifications on the next cycle and resolve threads it finds acceptable.
 
-3. **Do not** add rocket/thumbs-up reactions to bot comments — the review bot uses these reactions to mark threads as resolved.
+3. **Do not** add rocket/thumbs-up reactions to bot comments — the ironsha uses these reactions to mark threads as resolved.
 
 4. After addressing all threads, **re-apply the `bot-review-needed` label** to trigger another review cycle.
 
 ## Build and Test Gate
 
-The review bot runs your project's build and test commands **before** any code review. If they fail:
+The ironsha runs your project's build and test commands **before** any code review. If they fail:
 
 - The bot posts the failure output as a PR comment
 - The PR is labeled `bot-changes-needed`
@@ -132,7 +132,7 @@ The review bot runs your project's build and test commands **before** any code r
 
 **Always ensure your PR builds and passes tests before applying `bot-review-needed`.**
 
-## PR Best Practices for Review Bot Compatibility
+## PR Best Practices for Ironsha Compatibility
 
 - **Keep PRs focused** — one logical change per PR. The bot reviews the full `git diff main...HEAD`.
 - **Update `ARCHITECTURE.md`** if your change introduces new modules, layers, or alters data flow.

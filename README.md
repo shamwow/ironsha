@@ -1,4 +1,4 @@
-# review-bot
+# ironsha
 
 A polling daemon that reviews pull requests using either Claude Code or Codex. Supports iOS (SwiftUI), Android (Kotlin/Compose), Go webservers, and React webapps.
 
@@ -70,15 +70,15 @@ npm start
 | `MAX_REVIEW_CYCLES` | No | `5` | Max review-fix cycles before requesting human intervention |
 | `CI_POLL_TIMEOUT_MS` | No | `600000` | Timeout for CI checks before treating as failure |
 | `MERGE_CONFLICT_TIMEOUT_MS` | No | `300000` | Timeout for merge-conflict resolution |
-| `WORK_DIR` | No | `/tmp/review-bot` | Directory for cloning PR branches |
-| `TRANSCRIPT_DIR` | No | `/tmp/review-bot/transcripts` | Directory for saved agent output, stderr, and per-run metadata |
+| `WORK_DIR` | No | `/tmp/ironsha` | Directory for cloning PR branches |
+| `TRANSCRIPT_DIR` | No | `/tmp/ironsha/transcripts` | Directory for saved agent output, stderr, and per-run metadata |
 | `LOG_LEVEL` | No | `info` | Log level (`debug`, `info`, `warn`, `error`) |
 
 ## Provider Notes
 
 - `LLM_PROVIDER=claude` preserves the original behavior: `claude --print` with the existing JSON prompt contract.
 - `LLM_PROVIDER=codex` runs `codex exec` non-interactively, injects the same review instructions through Codex developer instructions, and wires the GitHub MCP server per invocation.
-- Codex reads `AGENTS.md` natively. review-bot also keeps `CLAUDE.md` as a fallback instruction filename for Codex runs.
+- Codex reads `AGENTS.md` natively. ironsha also keeps `CLAUDE.md` as a fallback instruction filename for Codex runs.
 
 ## Project Requirements
 
@@ -88,7 +88,7 @@ Reviewed repositories should keep build and test commands in one or more of:
 - `CLAUDE.md`
 - `README.md`
 
-review-bot reads those files in that order, extracts build/test commands, and deduplicates exact command strings before running them.
+ironsha reads those files in that order, extracts build/test commands, and deduplicates exact command strings before running them.
 
 ## How it works
 
@@ -117,7 +117,7 @@ Every bot comment includes a `thread::{uuid}` footer tag, plus a `review::{uuid}
 
 ## Development Notes
 
-- If you are using Claude as the provider, run review-bot outside a Claude Code session. Nested Claude sessions are blocked.
+- If you are using Claude as the provider, run ironsha outside a Claude Code session. Nested Claude sessions are blocked.
 - `npm run dev` uses `tsx --watch`, so source changes restart the bot automatically.
 - `npm run test` compiles the project and runs the Node built-in test suite against the compiled output.
 

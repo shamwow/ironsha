@@ -1,8 +1,8 @@
-# Multi-Platform PR Review Bot
+# Ironsha — Multi-Platform PR Reviewer
 
 ## Context
 
-`review-bot` is a polling daemon that drives a label-based PR review loop between GitHub and a code-capable LLM CLI. It supports four project families:
+`ironsha` is a polling daemon that drives a label-based PR review loop between GitHub and a code-capable LLM CLI. It supports four project families:
 
 - iOS (SwiftUI)
 - Android (Kotlin/Compose)
@@ -19,7 +19,7 @@ The poller, GitHub interactions, result parsing, and label lifecycle are shared.
 ## File Structure
 
 ```text
-review-bot/
+ironsha/
 ├── src/
 │   ├── index.ts                   # Boot config, logger, and poller
 │   ├── poller.ts                  # Poll GitHub for labeled PRs

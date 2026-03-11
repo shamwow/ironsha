@@ -143,7 +143,7 @@ export function buildPromptFile(options: BuildPromptFileOptions): string {
   }
 
   const combined = layers.join("\n\n---\n\n");
-  const tempDir = join(tmpdir(), "review-bot-prompts");
+  const tempDir = join(tmpdir(), "ironsha-prompts");
   mkdirSync(tempDir, { recursive: true });
 
   const tempPath = join(

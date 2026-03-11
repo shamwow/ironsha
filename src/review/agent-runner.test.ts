@@ -10,8 +10,8 @@ const {
 
 test("buildClaudeInvocation preserves the existing Claude CLI contract", () => {
   const invocation = buildClaudeInvocation({
-    promptPath: "/tmp/review-bot-prompt.md",
-    mcpConfigPath: "/tmp/review-bot-mcp.json",
+    promptPath: "/tmp/ironsha-prompt.md",
+    mcpConfigPath: "/tmp/ironsha-mcp.json",
     model: "claude-opus-4-6",
     maxTurns: 30,
   });
@@ -28,12 +28,12 @@ test("buildClaudeInvocation preserves the existing Claude CLI contract", () => {
     "--thinking",
     "enabled",
     "--append-system-prompt-file",
-    "/tmp/review-bot-prompt.md",
+    "/tmp/ironsha-prompt.md",
     "--mcp-config",
-    "/tmp/review-bot-mcp.json",
+    "/tmp/ironsha-mcp.json",
     "--dangerously-skip-permissions",
   ]);
-  assert.equal(invocation.cleanupPaths[0], "/tmp/review-bot-mcp.json");
+  assert.equal(invocation.cleanupPaths[0], "/tmp/ironsha-mcp.json");
   assert.equal(invocation.env.CLAUDECODE, "");
 });
 
@@ -41,7 +41,7 @@ test("buildCodexInvocation wires developer instructions and GitHub MCP overrides
   const invocation = buildCodexInvocation({
     promptText: "review instructions",
     githubToken: "gh-token",
-    outputPath: "/tmp/review-bot-codex-output.txt",
+    outputPath: "/tmp/ironsha-codex-output.txt",
     model: "gpt-5-codex",
   });
 
@@ -75,14 +75,14 @@ test("buildCodexInvocation wires developer instructions and GitHub MCP overrides
   );
   assert.ok(invocation.args.includes("--model"));
   assert.equal(invocation.env.GITHUB_PERSONAL_ACCESS_TOKEN, "gh-token");
-  assert.equal(invocation.cleanupPaths[0], "/tmp/review-bot-codex-output.txt");
+  assert.equal(invocation.cleanupPaths[0], "/tmp/ironsha-codex-output.txt");
 });
 
 test("buildCodexInvocation omits the model flag when CODEX_MODEL is unset", () => {
   const invocation = buildCodexInvocation({
     promptText: "review instructions",
     githubToken: "gh-token",
-    outputPath: "/tmp/review-bot-codex-output.txt",
+    outputPath: "/tmp/ironsha-codex-output.txt",
   });
 
   assert.equal(invocation.args.includes("--model"), false);
