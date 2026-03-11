@@ -17,7 +17,7 @@ The review bot supports projects using one of the following stacks, detected by 
 
 Your repository **must** contain:
 
-### `CLAUDE.md` or `README.md`
+### `AGENTS.md`, `CLAUDE.md`, or `README.md`
 Must document the project's **build and test commands**. The review bot runs these before reviewing. If they fail, the PR is rejected immediately with no code review.
 
 Example:
@@ -138,4 +138,4 @@ The review bot runs your project's build and test commands **before** any code r
 - **Update `ARCHITECTURE.md`** if your change introduces new modules, layers, or alters data flow.
 - **Include tests** for new code paths — the bot checks for testing gaps.
 - **Don't rely on formatting fixes** — the bot defers to the project's linter for style and focuses on substantive issues.
-- **Keep build/test commands in `CLAUDE.md` or `README.md` up to date** — the bot uses them as-is.
+- **Keep build/test commands in `AGENTS.md`, `CLAUDE.md`, or `README.md` up to date** — the bot uses them as-is.

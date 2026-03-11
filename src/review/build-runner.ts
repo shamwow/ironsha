@@ -7,6 +7,7 @@ import type { BuildResult } from "./types.js";
 const execAsync = promisify(exec);
 
 const MAX_OUTPUT_LENGTH = 2000;
+const BUILD_DOC_FILES = ["AGENTS.md", "CLAUDE.md", "README.md"] as const;
 
 async function readFileIfExists(path: string): Promise<string | null> {
   try {
@@ -16,12 +17,12 @@ async function readFileIfExists(path: string): Promise<string | null> {
   }
 }
 
-function extractCommands(content: string): string[] {
+export function extractCommands(content: string): string[] {
   const commands: string[] = [];
 
   // Match fenced code blocks near build/test sections
   const sectionPattern =
-    /##?\s*(Build|Test|Quick Reference|Development|Getting Started).*?\n([\s\S]*?)(?=\n##?\s|\n$)/gi;
+    /##?\s*(Build|Test|Quick Reference|Development|Getting Started).*?\n([\s\S]*?)(?=\n##?\s|$)/gi;
   let sectionMatch;
   while ((sectionMatch = sectionPattern.exec(content)) !== null) {
     const sectionBody = sectionMatch[2];
@@ -48,14 +49,31 @@ function extractCommands(content: string): string[] {
   return commands;
 }
 
+export function collectBuildAndTestCommands(
+  documents: Array<string | null | undefined>,
+): string[] {
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+
+  for (const document of documents) {
+    if (!document) continue;
+    for (const command of extractCommands(document)) {
+      if (seen.has(command)) continue;
+      seen.add(command);
+      ordered.push(command);
+    }
+  }
+
+  return ordered;
+}
+
 export async function runBuildAndTests(
   checkoutPath: string,
 ): Promise<BuildResult> {
-  const claudeMd = await readFileIfExists(join(checkoutPath, "CLAUDE.md"));
-  const readmeMd = await readFileIfExists(join(checkoutPath, "README.md"));
-
-  const allContent = [claudeMd, readmeMd].filter(Boolean).join("\n\n");
-  const commands = extractCommands(allContent);
+  const documents = await Promise.all(
+    BUILD_DOC_FILES.map((file) => readFileIfExists(join(checkoutPath, file))),
+  );
+  const commands = collectBuildAndTestCommands(documents);
 
   if (commands.length === 0) {
     return { success: true, output: "No build/test commands found" };

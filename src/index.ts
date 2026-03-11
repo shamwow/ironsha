@@ -1,13 +1,16 @@
 import "dotenv/config";
 import { Octokit } from "@octokit/rest";
-import { config } from "./config.js";
+import { config, resolveProviderModel } from "./config.js";
 import { logger } from "./logger.js";
 import { startPoller } from "./poller.js";
 
 const octokit = new Octokit({ auth: config.GITHUB_TOKEN });
 
 logger.info(
-  { model: config.CLAUDE_MODEL },
+  {
+    provider: config.LLM_PROVIDER,
+    model: resolveProviderModel(config.LLM_PROVIDER) ?? "provider-default",
+  },
   "review-bot starting",
 );
 

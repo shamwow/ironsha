@@ -1,9 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { Octokit } from "@octokit/rest";
-import { config } from "../config.js";
+import { config, resolveProviderModel } from "../config.js";
 import { logger } from "../logger.js";
 import { clonePR, pruneCheckouts } from "../checkout/repo-manager.js";
 import { setLabel } from "../github/labeler.js";
@@ -15,8 +12,9 @@ import {
   postGeneralComment,
 } from "../github/comments.js";
 import { makeFooter } from "../shared/footer.js";
+import { buildPromptFile } from "../prompts/prompt-builder.js";
 import { runBuildAndTests } from "./build-runner.js";
-import { runClaudeCode } from "./claude-code-runner.js";
+import { runAgent } from "./agent-runner.js";
 import { detectPlatform } from "./platform-detector.js";
 import { parseArchitectureResult, parseDetailedResult } from "./result-parser.js";
 import type {
@@ -25,47 +23,6 @@ import type {
   ReviewComment,
   ThreadResponse,
 } from "./types.js";
-
-function buildPromptFile(pass: "architecture-pass" | "detailed-pass", platform: string): string {
-  const promptsDir = join(import.meta.dirname, "..", "prompts");
-  const guidesDir = join(import.meta.dirname, "..", "guides");
-
-  const base = readFileSync(join(promptsDir, "base.md"), "utf-8");
-  const passPrompt = readFileSync(join(promptsDir, `${pass}.md`), "utf-8");
-  const guide = readFileSync(
-    join(guidesDir, `${platform.toUpperCase()}_CODE_REVIEW.md`),
-    "utf-8",
-  );
-
-  const combined = [base, passPrompt, guide].join("\n\n---\n\n");
-
-  const tempDir = join(tmpdir(), "review-bot-prompts");
-  mkdirSync(tempDir, { recursive: true });
-  const tempPath = join(tempDir, `${pass}-${platform}-${Date.now()}.md`);
-  writeFileSync(tempPath, combined);
-  return tempPath;
-}
-
-function buildMcpConfig(token: string): string {
-  const mcpConfig = {
-    mcpServers: {
-      github: {
-        type: "stdio",
-        command: "npx",
-        args: ["-y", "@github/mcp-server"],
-        env: {
-          GITHUB_PERSONAL_ACCESS_TOKEN: token,
-        },
-      },
-    },
-  };
-
-  const tempDir = join(tmpdir(), "review-bot-mcp");
-  mkdirSync(tempDir, { recursive: true });
-  const tempPath = join(tempDir, `mcp-config-${Date.now()}.json`);
-  writeFileSync(tempPath, JSON.stringify(mcpConfig, null, 2));
-  return tempPath;
-}
 
 function mergeResults(
   archResult: ReturnType<typeof parseArchitectureResult>,
@@ -181,9 +138,20 @@ export async function runReviewPipeline(
     log.info({ platform: detectedPlatform }, "Detected platform");
 
     // 4. Build prompt files and MCP config
-    const archPromptPath = buildPromptFile("architecture-pass", detectedPlatform);
-    const detailPromptPath = buildPromptFile("detailed-pass", detectedPlatform);
-    const mcpConfigPath = buildMcpConfig(config.GITHUB_TOKEN);
+    const provider = config.LLM_PROVIDER;
+    const model = resolveProviderModel(provider);
+    const archPromptPath = buildPromptFile({
+      pass: "architecture-pass",
+      provider,
+      model,
+      platform: detectedPlatform,
+    });
+    const detailPromptPath = buildPromptFile({
+      pass: "detailed-pass",
+      provider,
+      model,
+      platform: detectedPlatform,
+    });
 
     // Pre-fetch resolved thread IDs
     const { data: botUser } = await octokit.rest.users.getAuthenticated();
@@ -210,12 +178,12 @@ export async function runReviewPipeline(
 
     // 5. Pass 1: Architecture review
     log.info("Running architecture review pass");
-    const archRaw = await runClaudeCode({
+    const archRaw = await runAgent({
+      provider,
       checkoutPath,
       promptPath: archPromptPath,
-      mcpConfigPath,
       userMessage,
-      model: config.CLAUDE_MODEL,
+      githubToken: config.GITHUB_TOKEN,
       maxTurns: config.MAX_REVIEW_TURNS,
       timeoutMs: config.REVIEW_TIMEOUT_MS,
       reviewId,
@@ -233,12 +201,12 @@ export async function runReviewPipeline(
 
     // 6. Pass 2: Detailed review
     log.info("Running detailed review pass");
-    const detailRaw = await runClaudeCode({
+    const detailRaw = await runAgent({
+      provider,
       checkoutPath,
       promptPath: detailPromptPath,
-      mcpConfigPath,
       userMessage,
-      model: config.CLAUDE_MODEL,
+      githubToken: config.GITHUB_TOKEN,
       maxTurns: config.MAX_REVIEW_TURNS,
       timeoutMs: config.REVIEW_TIMEOUT_MS,
       reviewId,

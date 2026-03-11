@@ -1,17 +1,34 @@
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
+export type AgentProvider = "claude" | "codex";
+
+function optionalProviderEnv(
+  name: string,
+  fallback: AgentProvider,
+  env: NodeJS.ProcessEnv,
+): AgentProvider {
+  const value = env[name];
+  if (!value) return fallback;
+  if (value === "claude" || value === "codex") {
+    return value;
   }
-  return value;
+  throw new Error(
+    `Environment variable ${name} must be one of: claude, codex. Got: "${value}"`,
+  );
 }
 
-function optionalEnv(name: string, fallback: string): string {
-  return process.env[name] ?? fallback;
+function optionalEnvFrom(
+  name: string,
+  fallback: string,
+  env: NodeJS.ProcessEnv,
+): string {
+  return env[name] ?? fallback;
 }
 
-function optionalNumericEnv(name: string, fallback: number): number {
-  const raw = process.env[name];
+function optionalNumericEnvFrom(
+  name: string,
+  fallback: number,
+  env: NodeJS.ProcessEnv,
+): number {
+  const raw = env[name];
   if (!raw) return fallback;
   const parsed = Number(raw);
   if (Number.isNaN(parsed)) {
@@ -22,20 +39,52 @@ function optionalNumericEnv(name: string, fallback: number): number {
   return parsed;
 }
 
-export const config = {
-  GITHUB_TOKEN: requireEnv("GITHUB_TOKEN"),
-  ANTHROPIC_API_KEY: optionalEnv("ANTHROPIC_API_KEY", ""),
+function requireEnvFrom(name: string, env: NodeJS.ProcessEnv): string {
+  const value = env[name];
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value;
+}
 
-  CLAUDE_MODEL: optionalEnv("CLAUDE_MODEL", "claude-opus-4-6"),
-  MAX_REVIEW_TURNS: optionalNumericEnv("MAX_REVIEW_TURNS", 30),
-  POLL_INTERVAL_MS: optionalNumericEnv("POLL_INTERVAL_MS", 60_000),
-  REVIEW_TIMEOUT_MS: optionalNumericEnv("REVIEW_TIMEOUT_MS", 600_000),
-  WORK_DIR: optionalEnv("WORK_DIR", "/tmp/review-bot"),
-  TRANSCRIPT_DIR: optionalEnv("TRANSCRIPT_DIR", "/tmp/review-bot/transcripts"),
-  MAX_WRITE_TURNS: optionalNumericEnv("MAX_WRITE_TURNS", 50),
-  WRITE_TIMEOUT_MS: optionalNumericEnv("WRITE_TIMEOUT_MS", 900_000),
-  MAX_REVIEW_CYCLES: optionalNumericEnv("MAX_REVIEW_CYCLES", 5),
-  CI_POLL_TIMEOUT_MS: optionalNumericEnv("CI_POLL_TIMEOUT_MS", 600_000),
-  MERGE_CONFLICT_TIMEOUT_MS: optionalNumericEnv("MERGE_CONFLICT_TIMEOUT_MS", 300_000),
-  LOG_LEVEL: optionalEnv("LOG_LEVEL", "info"),
-} as const;
+export function readConfig(env: NodeJS.ProcessEnv = process.env) {
+  return {
+    GITHUB_TOKEN: requireEnvFrom("GITHUB_TOKEN", env),
+    ANTHROPIC_API_KEY: optionalEnvFrom("ANTHROPIC_API_KEY", "", env),
+    LLM_PROVIDER: optionalProviderEnv("LLM_PROVIDER", "claude", env),
+    CLAUDE_MODEL: optionalEnvFrom("CLAUDE_MODEL", "claude-opus-4-6", env),
+    CODEX_MODEL: optionalEnvFrom("CODEX_MODEL", "", env),
+    MAX_REVIEW_TURNS: optionalNumericEnvFrom("MAX_REVIEW_TURNS", 30, env),
+    POLL_INTERVAL_MS: optionalNumericEnvFrom("POLL_INTERVAL_MS", 60_000, env),
+    REVIEW_TIMEOUT_MS: optionalNumericEnvFrom("REVIEW_TIMEOUT_MS", 600_000, env),
+    WORK_DIR: optionalEnvFrom("WORK_DIR", "/tmp/review-bot", env),
+    TRANSCRIPT_DIR: optionalEnvFrom(
+      "TRANSCRIPT_DIR",
+      "/tmp/review-bot/transcripts",
+      env,
+    ),
+    MAX_WRITE_TURNS: optionalNumericEnvFrom("MAX_WRITE_TURNS", 50, env),
+    WRITE_TIMEOUT_MS: optionalNumericEnvFrom("WRITE_TIMEOUT_MS", 900_000, env),
+    MAX_REVIEW_CYCLES: optionalNumericEnvFrom("MAX_REVIEW_CYCLES", 5, env),
+    CI_POLL_TIMEOUT_MS: optionalNumericEnvFrom("CI_POLL_TIMEOUT_MS", 600_000, env),
+    MERGE_CONFLICT_TIMEOUT_MS: optionalNumericEnvFrom(
+      "MERGE_CONFLICT_TIMEOUT_MS",
+      300_000,
+      env,
+    ),
+    LOG_LEVEL: optionalEnvFrom("LOG_LEVEL", "info", env),
+  } as const;
+}
+
+export type AppConfig = ReturnType<typeof readConfig>;
+
+export function resolveProviderModel(
+  provider: AgentProvider,
+  appConfig: AppConfig = config,
+): string | undefined {
+  return provider === "claude"
+    ? appConfig.CLAUDE_MODEL
+    : appConfig.CODEX_MODEL || undefined;
+}
+
+export const config = readConfig();

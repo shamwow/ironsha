@@ -2,316 +2,266 @@
 
 ## Context
 
-A background service that reviews PRs via a label-driven workflow between two LLM bots (a code submitter bot and this review bot). Supports 4 platforms: **iOS (SwiftUI)**, **Android (Kotlin/Compose)**, **Go webservers**, and **React webapps**. Uses **Claude Code CLI** as the review engine — it can freely explore the codebase, run builds/tests/linters, and produce review comments. Runs as a polling daemon.
+`review-bot` is a polling daemon that drives a label-based PR review loop between GitHub and a code-capable LLM CLI. It supports four project families:
+
+- iOS (SwiftUI)
+- Android (Kotlin/Compose)
+- Go webservers
+- React webapps
+
+The runtime now supports two interchangeable agent providers:
+
+- Claude Code (`LLM_PROVIDER=claude`)
+- Codex (`LLM_PROVIDER=codex`)
+
+The poller, GitHub interactions, result parsing, and label lifecycle are shared. Provider-specific behavior is isolated to a single runner adapter.
 
 ## File Structure
 
-```
+```text
 review-bot/
 ├── src/
-│   ├── index.ts                      # Entry point: start poller
-│   ├── poller.ts                     # Poll GitHub API every 60s for labeled PRs
-│   ├── config.ts                     # Env var loading/validation
-│   ├── logger.ts                     # Pino structured logger
-│   ├── shared/
-│   │   └── footer.ts                # makeFooter() — thread/review ID tag builder
-│   ├── github/
-│   │   ├── client.ts                # Octokit instance (PAT auth)
-│   │   ├── comments.ts             # Fetch existing PR comment threads
-│   │   ├── review-poster.ts         # Post PR reviews via GitHub API
-│   │   └── labeler.ts               # Swap labels on PRs
+│   ├── index.ts                   # Boot config, logger, and poller
+│   ├── poller.ts                  # Poll GitHub for labeled PRs
+│   ├── config.ts                  # Env parsing and provider selection
+│   ├── logger.ts                  # Pino logger
 │   ├── checkout/
-│   │   └── repo-manager.ts          # Clone PR branch into temp dir, prune old dirs
+│   │   └── repo-manager.ts        # Clone/prune checkout dirs
+│   ├── github/
+│   │   ├── comments.ts            # Comment/thread helpers
+│   │   ├── labeler.ts             # Label mutation helpers
+│   │   └── review-poster.ts       # Pull-request review posting
 │   ├── review/
-│   │   ├── types.ts                  # ReviewResult, CommentThread, etc.
-│   │   ├── pipeline.ts              # Orchestrator: clone → build → test → review passes → post
-│   │   ├── platform-detector.ts     # Detect project type from file extensions
-│   │   ├── build-runner.ts          # Run build/test commands from CLAUDE.md / README.md
-│   │   ├── claude-code-runner.ts    # Invoke Claude Code CLI for each review pass
-│   │   └── result-parser.ts         # Parse Claude Code output into structured review data
-│   ├── writer/
-│   │   ├── types.ts                  # WriteResult interface
-│   │   ├── pipeline.ts              # Orchestrator: clone → merge → fix code → build → commit → push
-│   │   ├── result-parser.ts         # Parse Claude Code code-fix output
-│   │   ├── git-ops.ts               # hasChanges, commitAndPush, fetchBase, hasMergeConflicts, mergeBase
-│   │   ├── ci-monitor.ts            # checkCI() — single-shot CI status check (Check Runs + Commit Statuses)
-│   │   └── ci-handler.ts            # handleCIPending() — poller handler for bot-ci-pending PRs
+│   │   ├── agent-runner.ts        # Provider adapter for Claude/Codex
+│   │   ├── build-runner.ts        # Build/test discovery and execution
+│   │   ├── pipeline.ts            # Review orchestration
+│   │   ├── platform-detector.ts   # Diff-based platform detection
+│   │   ├── result-parser.ts       # Parse review-pass JSON output
+│   │   └── types.ts               # Review pipeline types
 │   ├── prompts/
-│   │   ├── base.md                  # Shared preamble (output format, thread handling rules)
-│   │   ├── architecture-pass.md     # Pass 1: architecture + ARCHITECTURE.md review
-│   │   ├── detailed-pass.md         # Pass 2: line-level code quality review
-│   │   ├── code-fix.md             # Code-fix pass: read reviews, make changes
-│   │   └── merge-conflict.md       # Merge conflict resolution pass
-│   └── guides/                       # Review guides shipped with service
-│       ├── IOS_CODE_REVIEW.md
-│       ├── ANDROID_CODE_REVIEW.md
-│       ├── GOLANG_CODE_REVIEW.md
-│       └── REACT_CODE_REVIEW.md
-├── package.json
-├── tsconfig.json
+│   │   ├── prompt-builder.ts      # Prompt registry + provider/model prompt assembly
+│   │   └── *.md                   # Prompt fragments
+│   ├── writer/
+│   │   ├── ci-handler.ts          # bot-ci-pending handler
+│   │   ├── ci-monitor.ts          # Check-run and status polling
+│   │   ├── git-ops.ts             # Merge/push helpers
+│   │   ├── pipeline.ts            # Code-fix orchestration
+│   │   ├── result-parser.ts       # Parse code-fix JSON output
+│   │   └── types.ts               # Write pipeline types
+│   └── guides/                    # Platform-specific review guides
+├── README.md
+├── CONTRIBUTING.md
 └── .env.example
 ```
 
-## Key Design: Polling
+## Runtime Model
 
-The bot polls GitHub's search API every **60 seconds** for open PRs with the `bot-review-needed`, `bot-changes-needed`, or `bot-ci-pending` label. No webhooks, no public endpoint.
+### Poller
 
-- `bot-review-needed` PRs are routed to the **review pipeline** (existing two-pass review)
-- `bot-changes-needed` PRs are routed to the **write pipeline** (code-fix loop)
-- `bot-ci-pending` PRs are checked for **CI status** (lightweight — no Claude invocation)
+Every poll cycle:
 
-**Authentication**: GitHub Personal Access Token (PAT) via `@octokit/rest`.
+1. List repos accessible to the configured GitHub token.
+2. Find open PRs labeled `bot-review-needed`, `bot-changes-needed`, or `bot-ci-pending`.
+3. Dispatch each PR to the matching pipeline while deduplicating in-flight work with an in-memory set.
 
-**Poll query**: `GET /search/issues?q=is:pr+is:open+label:bot-review-needed+org:{ORG}`
+### Shared Pipelines
 
-**Deduplication**: In-memory `Set<string>` tracks PRs currently being processed to avoid double-processing across consecutive polls.
+The two agent-driven pipelines are:
 
-## Key Design: Claude Code CLI as Review Engine
+- Review pipeline: clone -> build/test gate -> architecture pass -> detailed pass -> post comments -> swap labels
+- Write pipeline: clone -> fetch base -> resolve merge conflicts -> code-fix pass -> build/test gate -> commit/push -> swap labels
 
-Instead of crafting manual API calls, building dependency graphs, and parsing linter output ourselves, the bot invokes **Claude Code CLI** (`claude`) against the checked-out repo. Claude Code can:
+Both pipelines depend on the same runner contract:
 
-- Read any file in the repo (follows references, explores dependencies)
-- Run the project's linter via the terminal
-- Run builds and tests via the terminal
-- Understand `CLAUDE.md`, `README.md`, and `ARCHITECTURE.md` natively
-- Produce structured output via `--output-format json`
+```ts
+runAgent({
+  provider,
+  checkoutPath,
+  promptPath,
+  userMessage,
+  githubToken,
+  maxTurns,
+  timeoutMs,
+  reviewId,
+  pass,
+})
+```
 
-The bot invokes Claude Code via `child_process.execFile`:
+Everything outside that call is provider-agnostic.
+
+## Provider Adapter
+
+### Claude path
+
+Claude preserves the existing behavior:
 
 ```bash
 claude --print \
   --output-format json \
   --model {CLAUDE_MODEL} \
   --max-turns {MAX_REVIEW_TURNS} \
-  --thinking \
-  --append-system-prompt-file {prompt_file} \
-  --mcp-config {mcp_config_path} \
-  --dangerously-skip-permissions \
-  "{user_message}"
+  --thinking enabled \
+  --append-system-prompt-file {promptPath} \
+  --mcp-config {tempMcpConfigPath} \
+  --dangerously-skip-permissions
 ```
 
-Key flags:
-- `--print` — non-interactive (single prompt in, response out)
-- `--output-format json` — structured results
-- `--model {CLAUDE_MODEL}` — configurable model, defaults to `claude-opus-4-6`
-- `--max-turns {MAX_REVIEW_TURNS}` — configurable max agentic turns, defaults to `30`
-- `--thinking` — enables extended thinking for higher-quality reasoning during review
-- `--append-system-prompt-file` — adds review instructions **on top of** Claude Code's default prompt, preserving its built-in tools (Read, Grep, Glob, Bash, etc.)
-- `--mcp-config` — loads custom MCP server providing GitHub comment tools
-- `--dangerously-skip-permissions` — skips permission prompts (safe in our controlled CI context)
-- Working directory is set to the checkout path, so Claude Code reads `CLAUDE.md` and `ARCHITECTURE.md` from the repo automatically
+Details:
 
-### Why `--append-system-prompt-file` not `--system-prompt-file`
+- The combined prompt is passed as an appended system prompt file.
+- A temporary GitHub MCP config file is written per invocation.
+- `maxTurns` is enforced through Claude’s native CLI flag.
 
-`--system-prompt` replaces the entire default prompt — Claude Code loses its built-in tools and behaviors. `--append-system-prompt-file` adds our review instructions while preserving Claude Code's default capabilities (file reading, terminal access, glob/grep, etc.). This is critical — we want Claude Code to behave like Claude Code, with additional review-specific guidance.
+### Codex path
 
-## Key Design: GitHub MCP Server for PR Comments
+Codex runs non-interactively through `codex exec`:
 
-Instead of pre-fetching all comment threads and stuffing them into the prompt, we give Claude Code the official [GitHub MCP server](https://github.com/github/github-mcp-server) (`@github/mcp-server`). This provides tools to list PR comments, read thread details, and more — on demand during the review.
+```bash
+codex --dangerously-bypass-approvals-and-sandbox exec \
+  --ephemeral \
+  --output-last-message {outputPath} \
+  -c 'developer_instructions="..."' \
+  -c 'project_doc_fallback_filenames=["AGENTS.md","CLAUDE.md"]' \
+  -c 'mcp_servers.github.enabled=true' \
+  -c 'mcp_servers.github.required=true' \
+  -c 'mcp_servers.github.command="npx"' \
+  -c 'mcp_servers.github.args=["-y","@github/mcp-server"]' \
+  -c 'mcp_servers.github.env_vars=["GITHUB_PERSONAL_ACCESS_TOKEN"]' \
+  [--model {CODEX_MODEL}]
+```
 
-**MCP config passed to Claude Code:**
+Details:
+
+- The resolved prompt stack is injected through Codex `developer_instructions`.
+- GitHub MCP is configured through per-process config overrides instead of a temp config file.
+- `GITHUB_PERSONAL_ACCESS_TOKEN` is passed in the Codex process environment and whitelisted for the GitHub MCP server.
+- Codex does not expose a native `max-turns` flag, so timeout remains the hard execution cap for Codex runs.
+
+## Prompt and Instruction Model
+
+Prompt assembly is centralized in `src/prompts/prompt-builder.ts`.
+
+The builder resolves a prompt template from a code registry:
+
+- default template per pass
+- optional provider-level override
+- optional exact provider/model override
+
+Matching precedence is:
+
+1. exact `provider + model`
+2. `provider` default
+3. built-in pass default
+
+The registry is the place to change prompt stacks for a provider/model pair. No pipeline code changes are required when adjusting prompt composition.
+
+Default prompt templates are:
+
+```text
+architecture-pass -> base.md + architecture-pass.md + platform guide
+detailed-pass     -> base.md + detailed-pass.md + platform guide
+code-fix          -> code-fix.md + platform guide
+merge-conflict    -> merge-conflict.md
+```
+
+For example, a model-specific override can append an extra fragment such as `codex-detailed.md` for `provider=codex, model=gpt-5-codex` while leaving every other pass and provider on the default stack.
+
+Prompt expectations:
+
+- Output must still be a single JSON object matching the existing parser contract.
+- The agent is told to read project instructions from `AGENTS.md` and `CLAUDE.md` when present.
+- The agent uses GitHub MCP to inspect review threads on demand instead of receiving the full thread state in the prompt.
+- If `CODEX_MODEL` is unset, prompt selection for Codex falls back to the provider-level default because there is no exact model string to match.
+
+## Build/Test Gate
+
+Before any review or post-fix push, the bot runs project commands discovered from repository docs in this order:
+
+1. `AGENTS.md`
+2. `CLAUDE.md`
+3. `README.md`
+
+Command extraction behavior:
+
+- Read fenced shell blocks or `$ ...` lines from build/test-like sections.
+- Preserve first-seen order across files.
+- Deduplicate exact command strings so overlapping docs do not run the same command twice.
+
+If build/tests fail before review:
+
+- Post the failure output to the PR.
+- Apply `bot-changes-needed`.
+- Skip all agent review passes.
+
+## Review/Write Output Contract
+
+The providers share the same JSON result shapes.
+
+Review passes return:
+
 ```json
 {
-  "mcpServers": {
-    "github": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "@github/mcp-server"],
-      "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "{token}"
-      }
-    }
-  }
+  "summary": "Overall assessment",
+  "new_comments": [],
+  "thread_responses": []
 }
 ```
 
-The pipeline writes this config to a temp file before each Claude Code invocation. The user message tells Claude Code which PR to review (owner/repo/number), and it uses the GitHub MCP tools to fetch comments, threads, and diff context as needed.
+Write pass returns:
 
-## Key Design: System Prompt Architecture
-
-The system prompt is composed from layers, tuned per review pass and per platform.
-
-### Prompt layers
-
-```
-[Claude Code default prompt]          ← preserved via --append-system-prompt-file
-  + base.md                           ← shared rules: output format, thread handling, resolved-reactions semantics
-  + {pass}-specific instructions      ← architecture-pass.md OR detailed-pass.md
-  + {PLATFORM}_CODE_REVIEW.md         ← platform-specific review guide
+```json
+{
+  "threads_addressed": [],
+  "build_passed": true,
+  "summary": "What changed"
+}
 ```
 
-These are concatenated into a single file before invocation. The pipeline builds a temp prompt file per pass:
+The parsers are intentionally tolerant:
 
-```typescript
-const prompt = [
-  readFileSync("prompts/base.md"),
-  readFileSync(`prompts/${pass}.md`),
-  readFileSync(`guides/${platform}_CODE_REVIEW.md`),
-].join("\n\n---\n\n");
-writeFileSync(tempPromptPath, prompt);
+- Accept a raw JSON object
+- Accept a fenced ```json block
+- Accept a provider envelope that stores the final text in a top-level `result` field
+
+## Transcripts
+
+Each agent invocation writes artifacts under `TRANSCRIPT_DIR`:
+
+- `{reviewId}-{pass}.json` — final captured agent message
+- `{reviewId}-{pass}.stderr.log` — stderr when present
+- `{reviewId}-{pass}.meta.json` — provider, resolved model, command, pass, timestamp
+
+Transcript pruning keeps the most recent 30 invocation groups, not 30 individual files.
+
+## Label Lifecycle
+
+Primary labels:
+
+- `bot-review-needed`
+- `bot-changes-needed`
+- `bot-ci-pending`
+- `human-review-needed`
+- `bot-human-intervention`
+
+Lifecycle:
+
+```text
+bot-review-needed
+  -> review pipeline
+  -> human-review-needed | bot-changes-needed
+
+bot-changes-needed
+  -> write pipeline
+  -> bot-ci-pending | bot-human-intervention
+
+bot-ci-pending
+  -> CI handler
+  -> bot-review-needed | bot-changes-needed
 ```
 
-## Key Design: Build + Test Gate
+## Design Constraints
 
-Before running the review, the bot runs the project's build and test commands. These are discovered from `CLAUDE.md` or `README.md` in the repo (each project documents its build/test commands there).
-
-**If build or tests fail:**
-- The bot posts a comment with the failure output (truncated to a reasonable length)
-- Removes all labels, adds `bot-changes-needed`
-- Skips the Claude Code review passes entirely (fail fast)
-
-**If build and tests pass:** proceed to the two-pass review.
-
-## Key Design: Two-Pass Review via Claude Code
-
-Each review cycle runs **two Claude Code sessions** sequentially against the checkout:
-
-### Pass 1: Architecture Review
-High-level review focused on design and structure. Reads `ARCHITECTURE.md`, evaluates structural impact, flags if `ARCHITECTURE.md` needs updating.
-
-### Pass 2: Detailed Line-Level Review
-Granular review focused on code quality. Runs the project's linter, reviews for correctness, performance, memory management, error handling, security, and testing gaps.
-
-### Shared Review ID
-
-A single `reviewId` (UUID) is generated per pipeline run and shared across both passes. Transcripts are saved as `{reviewId}-architecture.json` and `{reviewId}-detailed.json`. Every bot comment includes `review::{reviewId}` in its footer.
-
-### Thread IDs
-
-Every bot comment (inline review comments, general comments, LGTM, build failure, error, architecture update) includes a `thread::{uuid}` footer tag. This enables resolution tracking for all comment types — not just inline PR review threads. Resolved threads are marked with emoji reactions (rocket + thumbs-up) instead of text replies. The pipeline pre-fetches resolved thread IDs via the Octokit reactions API and passes them to Claude in the user message, so Claude doesn't need to scan for resolution markers itself.
-
-### Merging Results
-- Combine architecture + detail comments, deduplicate by file+line proximity
-- Merge thread responses — Pass 1 takes precedence on conflicts
-- Validate every unresolved thread has a response
-
-## Key Design: Label-Driven Review Cycle
-
-### Labels
-
-| Label | Meaning | Applied by |
-|---|---|---|
-| `bot-review-needed` | PR is ready for the review bot to examine | Code submitter bot / CI handler |
-| `bot-changes-needed` | Review bot found issues; write bot picks it up | Review bot / CI handler |
-| `bot-ci-pending` | Code pushed, waiting for CI to pass | Write pipeline |
-| `human-review-needed` | Review bot approved; ready for human | Review bot |
-| `bot-human-intervention` | Max review cycles exceeded; needs human help | Write pipeline |
-
-### Lifecycle
-
-```
-Code submitter opens PR, adds `bot-review-needed`
-  │
-  ▼
-Poller finds PR → runs review pipeline:
-  1. Clone PR branch into temp dir
-  2. Run build + tests (from CLAUDE.md / README.md)
-  │
-  ├─ Build/tests fail:
-  │   Post failure comment, add `bot-changes-needed`
-  │
-  └─ Build/tests pass:
-      3. Pass 1: Claude Code architecture review
-      4. Pass 2: Claude Code detailed review
-      5. Merge results, validate thread coverage
-      │
-      ├─ Unresolved comments remain:
-      │   Post new comments, reply to threads
-      │   Add `bot-changes-needed`  ──────────────────────┐
-      │                                                    │
-      └─ No unresolved comments:                           │
-          Post "LGTM" review                               │
-          Add `human-review-needed`                        │
-                                                           ▼
-                                              Poller finds PR → runs write pipeline:
-                                                1. Check cycle limit
-                                                │
-                                                ├─ Limit reached:
-                                                │   Add `bot-human-intervention`, stop
-                                                │
-                                                └─ Under limit:
-                                                    2. Clone PR branch
-                                                    3. Fetch base + resolve merge conflicts
-                                                    4. Invoke Claude Code to fix code
-                                                    5. Run build + tests
-                                                    │
-                                                    ├─ Build fails or no changes:
-                                                    │   Post error, keep `bot-changes-needed`
-                                                    │
-                                                    └─ Build passes + changes:
-                                                        Commit, push, post thread replies
-                                                        Add `bot-ci-pending`
-                                                            │
-                                              Poller finds PR → CI handler:
-                                                ├─ CI passed:
-                                                │   Add `bot-review-needed` (loop back ↑)
-                                                │
-                                                ├─ CI failed / timed out:
-                                                │   Add `bot-changes-needed` (retry)
-                                                │
-                                                └─ CI pending:
-                                                    Do nothing (re-check next cycle)
-```
-
-Adding any label **removes all other bot labels first**. Only one label is active at a time.
-
-## Key Design: Write Pipeline (Code-Fix Loop)
-
-The write pipeline (`src/writer/pipeline.ts`) complements the review pipeline by automatically fixing review comments. When the review pipeline applies `bot-changes-needed`, the poller routes the PR to the write pipeline.
-
-### Cycle limit
-
-The pipeline counts distinct `review::{uuid}` values in PR comments to determine how many review cycles have occurred. If this exceeds `MAX_REVIEW_CYCLES` (default 5), it applies `bot-human-intervention` and stops — preventing infinite fix loops.
-
-### Code-fix pass
-
-A single Claude Code session reads all unresolved review comments via GitHub MCP, makes code changes, and outputs JSON with `threads_addressed`, `build_passed`, and `summary`. The pipeline pre-fetches resolved thread IDs and passes them in the user message so Claude can skip already-resolved threads. The prompt (`code-fix.md`) instructs Claude to make minimal, focused changes and not commit/push.
-
-### Merge conflict resolution
-
-Before running the code-fix pass, the pipeline checks for merge conflicts with the base branch:
-
-1. `fetchBase()` fetches the latest base branch from origin
-2. `hasMergeConflicts()` performs a dry-run merge to detect conflicts
-3. If conflicts exist: `mergeBase()` starts a real merge (leaving conflict markers), then invokes Claude Code with `merge-conflict.md` to resolve them
-4. After resolution, the pipeline verifies no `<<<<<<<` markers remain and commits the merge
-
-Uses merge (not rebase) — safer, preserves history, no force-push needed.
-
-### Post-fix flow
-
-After Claude makes changes:
-1. The pipeline runs the project's build/test commands as a safety net
-2. If build passes: commits, pushes, posts replies to addressed threads, and swaps the label to `bot-ci-pending`
-3. If build fails or no changes: posts an error comment and keeps `bot-changes-needed`
-
-### CI status monitoring
-
-After the write pipeline pushes code, it applies `bot-ci-pending` instead of immediately requesting re-review. The poller picks up `bot-ci-pending` PRs and runs a lightweight CI check each cycle (no Claude invocation):
-
-- `checkCI()` in `ci-monitor.ts` fetches both GitHub Check Runs and Commit Statuses APIs in parallel
-- **CI passed** (or no CI configured) → swap to `bot-review-needed`
-- **CI failed** → post comment with failed check names/links, swap to `bot-changes-needed`
-- **CI pending** → check timeout (derived from head commit timestamp, not in-memory state). If over `CI_POLL_TIMEOUT_MS`, treat as timeout. Otherwise do nothing — re-check next cycle.
-
-This is **stateless** — if the process dies during `bot-ci-pending`, it re-reads the label on restart and resumes checking. Timeout is derived from the commit date, not when monitoring started.
-
-### Git operations
-
-`src/writer/git-ops.ts` provides:
-- `hasChanges` — checks `git status --porcelain`
-- `commitAndPush` — sets bot identity, adds all changes, commits, pushes
-- `fetchBase` — fetches the base branch from origin
-- `hasMergeConflicts` — dry-run merge to detect conflicts
-- `mergeBase` — performs the actual merge (may leave conflict markers)
-
-## Key Design: Platform Detection
-
-`platform-detector.ts` inspects file extensions in the diff to select the review guide:
-
-| Extension pattern | Platform | Guide file |
-|---|---|---|
-| `*.swift` | ios | `IOS_CODE_REVIEW.md` |
-| `*.kt`, `*.kts` | android | `ANDROID_CODE_REVIEW.md` |
-| `*.go` | golang | `GOLANG_CODE_REVIEW.md` |
-| `*.tsx`, `*.ts`, `*.jsx` | react | `REACT_CODE_REVIEW.md` |
+- Provider selection is process-wide via `LLM_PROVIDER`.
+- The selected provider is used for architecture review, detailed review, code-fix, and merge-conflict resolution.
+- GitHub remains the single source of truth for PR state, labels, comments, and resolved-thread reactions.
+- The runner adapter is the only place that should know about provider-specific CLI flags, MCP wiring, or auth semantics.

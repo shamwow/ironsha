@@ -1,16 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { Octokit } from "@octokit/rest";
-import { config } from "../config.js";
+import { config, resolveProviderModel } from "../config.js";
 import { logger } from "../logger.js";
 import { clonePR, pruneCheckouts } from "../checkout/repo-manager.js";
 import { setLabel } from "../github/labeler.js";
 import { fetchResolvedThreadIds, postGeneralComment } from "../github/comments.js";
+import { buildPromptFile } from "../prompts/prompt-builder.js";
 import { makeFooter } from "../shared/footer.js";
 import { runBuildAndTests } from "../review/build-runner.js";
-import { runClaudeCode } from "../review/claude-code-runner.js";
+import { runAgent } from "../review/agent-runner.js";
 import { detectPlatform } from "../review/platform-detector.js";
 import type { PRInfo } from "../review/types.js";
 import { hasChanges, commitAndPush, fetchBase, hasMergeConflicts, mergeBase } from "./git-ops.js";
@@ -19,57 +17,6 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-
-function buildPromptFile(platform: string): string {
-  const promptsDir = join(import.meta.dirname, "..", "prompts");
-  const guidesDir = join(import.meta.dirname, "..", "guides");
-
-  const codeFixPrompt = readFileSync(join(promptsDir, "code-fix.md"), "utf-8");
-  const guide = readFileSync(
-    join(guidesDir, `${platform.toUpperCase()}_CODE_REVIEW.md`),
-    "utf-8",
-  );
-
-  const combined = [codeFixPrompt, guide].join("\n\n---\n\n");
-
-  const tempDir = join(tmpdir(), "review-bot-prompts");
-  mkdirSync(tempDir, { recursive: true });
-  const tempPath = join(tempDir, `code-fix-${platform}-${Date.now()}.md`);
-  writeFileSync(tempPath, combined);
-  return tempPath;
-}
-
-function buildConflictPromptFile(): string {
-  const promptsDir = join(import.meta.dirname, "..", "prompts");
-  const prompt = readFileSync(join(promptsDir, "merge-conflict.md"), "utf-8");
-
-  const tempDir = join(tmpdir(), "review-bot-prompts");
-  mkdirSync(tempDir, { recursive: true });
-  const tempPath = join(tempDir, `merge-conflict-${Date.now()}.md`);
-  writeFileSync(tempPath, prompt);
-  return tempPath;
-}
-
-function buildMcpConfig(token: string): string {
-  const mcpConfig = {
-    mcpServers: {
-      github: {
-        type: "stdio",
-        command: "npx",
-        args: ["-y", "@github/mcp-server"],
-        env: {
-          GITHUB_PERSONAL_ACCESS_TOKEN: token,
-        },
-      },
-    },
-  };
-
-  const tempDir = join(tmpdir(), "review-bot-mcp");
-  mkdirSync(tempDir, { recursive: true });
-  const tempPath = join(tempDir, `mcp-config-${Date.now()}.json`);
-  writeFileSync(tempPath, JSON.stringify(mcpConfig, null, 2));
-  return tempPath;
-}
 
 function countReviewCycles(comments: Array<{ body?: string }>): number {
   const reviewIds = new Set<string>();
@@ -94,6 +41,9 @@ export async function runWritePipeline(
   let checkoutPath: string | undefined;
 
   try {
+    const provider = config.LLM_PROVIDER;
+    const model = resolveProviderModel(provider);
+
     // 1. Check cycle limit
     log.info("Checking review cycle count");
     const allComments = await octokit.paginate(
@@ -149,9 +99,12 @@ export async function runWritePipeline(
       if (mergeResult.success) {
         log.info("Merge completed without conflicts (race condition — conflicts resolved upstream)");
       } else {
-        // Invoke Claude Code to resolve conflicts
-        const conflictPromptPath = buildConflictPromptFile();
-        const conflictMcpConfigPath = buildMcpConfig(config.GITHUB_TOKEN);
+        // Invoke the selected agent to resolve conflicts
+        const conflictPromptPath = buildPromptFile({
+          pass: "merge-conflict",
+          provider,
+          model,
+        });
         const conflictId = randomUUID();
 
         const conflictMessage = [
@@ -161,13 +114,13 @@ export async function runWritePipeline(
           `PR branch: ${pr.branch}`,
         ].join("\n");
 
-        log.info({ conflictId }, "Invoking Claude Code for merge conflict resolution");
-        await runClaudeCode({
+        log.info({ conflictId, provider: config.LLM_PROVIDER }, "Invoking agent for merge conflict resolution");
+        await runAgent({
+          provider,
           checkoutPath,
           promptPath: conflictPromptPath,
-          mcpConfigPath: conflictMcpConfigPath,
           userMessage: conflictMessage,
-          model: config.CLAUDE_MODEL,
+          githubToken: config.GITHUB_TOKEN,
           maxTurns: config.MAX_WRITE_TURNS,
           timeoutMs: config.MERGE_CONFLICT_TIMEOUT_MS,
           reviewId: conflictId,
@@ -240,8 +193,12 @@ export async function runWritePipeline(
     log.info({ platform: detectedPlatform }, "Detected platform");
 
     // 5. Build prompt and MCP config
-    const promptPath = buildPromptFile(detectedPlatform);
-    const mcpConfigPath = buildMcpConfig(config.GITHUB_TOKEN);
+    const promptPath = buildPromptFile({
+      pass: "code-fix",
+      provider,
+      model,
+      platform: detectedPlatform,
+    });
 
     // Pre-fetch resolved thread IDs
     const { data: botUser } = await octokit.rest.users.getAuthenticated();
@@ -265,13 +222,13 @@ export async function runWritePipeline(
     const writeId = randomUUID();
     log.info({ writeId }, "Starting code-fix pass");
 
-    // 6. Invoke Claude Code
-    const raw = await runClaudeCode({
+    // 6. Invoke the selected agent
+    const raw = await runAgent({
+      provider,
       checkoutPath,
       promptPath,
-      mcpConfigPath,
       userMessage,
-      model: config.CLAUDE_MODEL,
+      githubToken: config.GITHUB_TOKEN,
       maxTurns: config.MAX_WRITE_TURNS,
       timeoutMs: config.WRITE_TIMEOUT_MS,
       reviewId: writeId,

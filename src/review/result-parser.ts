@@ -1,7 +1,7 @@
 import type { ArchitecturePassResult, DetailedPassResult } from "./types.js";
 
 function extractJsonFromOutput(raw: string): unknown | null {
-  // Claude Code --output-format json wraps the response.
+  // Some providers wrap the final JSON inside an outer JSON envelope.
   // Try to parse the whole thing as JSON first.
   try {
     const outer = JSON.parse(raw);
