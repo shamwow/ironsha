@@ -68,7 +68,7 @@ Every poll cycle:
 
 The two agent-driven pipelines are:
 
-- Review pipeline: clone -> build/test gate -> architecture pass -> detailed pass -> post comments -> swap labels
+- Review pipeline: clone -> build/test gate -> architecture pass -> (if no issues) detailed pass -> post review (REQUEST_CHANGES) -> swap labels
 - Write pipeline: clone -> fetch base -> resolve merge conflicts -> code-fix pass -> build/test gate -> commit/push -> swap labels
 
 Both pipelines depend on the same runner contract:
@@ -247,7 +247,7 @@ Lifecycle:
 
 ```text
 bot-review-needed
-  -> review pipeline
+  -> review pipeline (posts with REQUEST_CHANGES event when issues are found)
   -> human-review-needed | bot-changes-needed
 
 bot-changes-needed

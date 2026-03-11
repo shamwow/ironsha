@@ -200,31 +200,45 @@ export async function runReviewPipeline(
       "Architecture pass complete",
     );
 
-    // 6. Pass 2: Detailed review
-    log.info("Running detailed review pass");
-    const detailRaw = await agentRunner({
-      provider,
-      checkoutPath,
-      promptPath: detailPromptPath,
-      userMessage,
-      githubToken: config.GITHUB_TOKEN,
-      maxTurns: config.MAX_REVIEW_TURNS,
-      timeoutMs: config.REVIEW_TIMEOUT_MS,
-      reviewId,
-      pass: "detailed",
-    });
-    const detailResult = parseDetailedResult(detailRaw);
-    log.info(
-      {
-        comments: detailResult.detail_comments.length,
-        threads: detailResult.thread_responses.length,
-        reviewId,
-      },
-      "Detailed pass complete",
-    );
+    // 6. Check if architecture pass found issues
+    const archHasIssues = archResult.architecture_comments.length > 0 ||
+      archResult.thread_responses.some((tr) => !tr.resolved);
 
-    // 7. Merge results
-    const merged = mergeResults(archResult, detailResult);
+    let merged: MergedReviewResult;
+    if (archHasIssues) {
+      log.info("Architecture pass found issues, skipping detailed review");
+      merged = {
+        comments: archResult.architecture_comments,
+        thread_responses: archResult.thread_responses,
+        architecture_update_needed: archResult.architecture_update_needed,
+        summary: archResult.summary ?? "Architecture review found issues.",
+      };
+    } else {
+      // Pass 2: Detailed review
+      log.info("Running detailed review pass");
+      const detailRaw = await agentRunner({
+        provider,
+        checkoutPath,
+        promptPath: detailPromptPath,
+        userMessage,
+        githubToken: config.GITHUB_TOKEN,
+        maxTurns: config.MAX_REVIEW_TURNS,
+        timeoutMs: config.REVIEW_TIMEOUT_MS,
+        reviewId,
+        pass: "detailed",
+      });
+      const detailResult = parseDetailedResult(detailRaw);
+      log.info(
+        {
+          comments: detailResult.detail_comments.length,
+          threads: detailResult.thread_responses.length,
+          reviewId,
+        },
+        "Detailed pass complete",
+      );
+
+      merged = mergeResults(archResult, detailResult);
+    }
 
     // 8. Post results
     // Add resolved reactions on resolved threads
@@ -291,6 +305,7 @@ export async function runReviewPipeline(
         pr.number,
         commentsWithFooter,
         merged.summary + makeFooter(randomUUID(), reviewId),
+        "REQUEST_CHANGES",
       );
     }
 

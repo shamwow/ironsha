@@ -62,15 +62,23 @@ The ironsha and write bot form an autonomous loop:
     ▼                          ▼
 Build/tests FAIL          Build/tests PASS
     │                          │
-    ▼                     Two-pass review
-bot-changes-needed             │
+    │                     Architecture review
+    │                          │
     │                    ┌─────┴──────┐
     │                    │            │
     │                    ▼            ▼
-    │              Issues found   No issues
+    │              Arch issues    No arch issues
     │                    │            │
-    │                    ▼            ▼
-    │           bot-changes-needed  human-review-needed
+    │                    │       Detailed review
+    │                    │            │
+    │                    │      ┌─────┴──────┐
+    │                    │      │            │
+    │                    │      ▼            ▼
+    │                    │  Issues found   No issues
+    │                    │      │            │
+    │                    ▼      ▼            ▼
+    │              bot-changes-needed  human-review-needed
+    │              (REQUEST_CHANGES)
     │                    │
     ▼                    ▼
    Write bot picks up the PR automatically
@@ -90,7 +98,7 @@ The write bot automatically addresses review comments, pushes fixes, and re-trig
 
 ## What the Ironsha Checks
 
-The bot runs two sequential review passes:
+The bot runs up to two sequential review passes. If Pass 1 finds issues, Pass 2 is skipped — there's no point reviewing line-level details when the architecture needs rework. When issues are found, the review is posted with GitHub's "Request changes" status.
 
 **Pass 1 — Architecture Review**
 - Does the change fit the existing architecture per `ARCHITECTURE.md`?
@@ -99,7 +107,7 @@ The bot runs two sequential review passes:
 - Are dependencies pointing in the right direction?
 - Does `ARCHITECTURE.md` need updating?
 
-**Pass 2 — Detailed Code Review**
+**Pass 2 — Detailed Code Review** *(only runs if Pass 1 finds no issues)*
 - Runs the project's linter
 - Correctness: logic errors, null safety, edge cases
 - Performance: unnecessary allocations, N+1 queries

@@ -97,8 +97,8 @@ The bot polls GitHub every 60 seconds for open PRs with the `bot-review-needed`,
 **Review pipeline** (`bot-review-needed`):
 1. Clone the PR branch into a temp directory.
 2. Run the project's build and test commands from `AGENTS.md`, `CLAUDE.md`, or `README.md`.
-3. If build/tests pass, run two agent review passes (architecture + detailed).
-4. Post review comments, mark resolved threads with emoji reactions, and swap labels.
+3. If build/tests pass, run an architecture review pass. If no architecture issues are found, run a detailed review pass.
+4. Post review with GitHub's "Request changes" status when issues are found, mark resolved threads with emoji reactions, and swap labels.
 
 **Write pipeline** (`bot-changes-needed`):
 1. Enforce the review-cycle limit.
