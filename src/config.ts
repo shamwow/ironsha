@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 export type AgentProvider = "claude" | "codex";
 
 function optionalProviderEnv(
@@ -47,15 +49,30 @@ function requireEnvFrom(name: string, env: NodeJS.ProcessEnv): string {
   return value;
 }
 
+function resolvePrivateKey(raw: string): string {
+  if (raw.endsWith(".pem") || raw.startsWith("/") || raw.startsWith("~") || raw.startsWith("./") || raw.startsWith("../")) {
+    const resolvedPath = raw.startsWith("~")
+      ? raw.replace("~", process.env.HOME ?? "")
+      : raw;
+    return readFileSync(resolvedPath, "utf-8");
+  }
+  return raw;
+}
+
 export function readConfig(env: NodeJS.ProcessEnv = process.env) {
+  const rawKey = requireEnvFrom("GITHUB_APP_PRIVATE_KEY", env);
   return {
-    GITHUB_TOKEN: requireEnvFrom("GITHUB_TOKEN", env),
+    GITHUB_APP_ID: requireEnvFrom("GITHUB_APP_ID", env),
+    GITHUB_APP_PRIVATE_KEY: resolvePrivateKey(rawKey),
+    GITHUB_WEBHOOK_SECRET: requireEnvFrom("GITHUB_WEBHOOK_SECRET", env),
+    WEBHOOK_PORT: optionalNumericEnvFrom("WEBHOOK_PORT", 3000, env),
+    SMEE_URL: optionalEnvFrom("SMEE_URL", "", env),
+    TEST_GITHUB_TOKEN: optionalEnvFrom("TEST_GITHUB_TOKEN", "", env),
     ANTHROPIC_API_KEY: optionalEnvFrom("ANTHROPIC_API_KEY", "", env),
     LLM_PROVIDER: optionalProviderEnv("LLM_PROVIDER", "claude", env),
     CLAUDE_MODEL: optionalEnvFrom("CLAUDE_MODEL", "claude-opus-4-6", env),
     CODEX_MODEL: optionalEnvFrom("CODEX_MODEL", "", env),
     MAX_REVIEW_TURNS: optionalNumericEnvFrom("MAX_REVIEW_TURNS", 30, env),
-    POLL_INTERVAL_MS: optionalNumericEnvFrom("POLL_INTERVAL_MS", 60_000, env),
     REVIEW_TIMEOUT_MS: optionalNumericEnvFrom("REVIEW_TIMEOUT_MS", 600_000, env),
     WORK_DIR: optionalEnvFrom("WORK_DIR", "/tmp/ironsha", env),
     TRANSCRIPT_DIR: optionalEnvFrom(

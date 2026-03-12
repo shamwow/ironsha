@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-process.env.GITHUB_TOKEN ??= "test-token";
+process.env.GITHUB_APP_ID ??= "12345";
+process.env.GITHUB_APP_PRIVATE_KEY ??= "test-key";
+process.env.GITHUB_WEBHOOK_SECRET ??= "test-secret";
 
 const {
   buildClaudeInvocation,

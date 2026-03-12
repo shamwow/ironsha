@@ -73,8 +73,9 @@ function mergeResults(
 export async function runReviewPipeline(
   octokit: Octokit,
   pr: PRInfo,
-  agentRunner: AgentRunner = runAgent,
+  opts: { githubToken: string; botLogin: string; agentRunner?: AgentRunner },
 ): Promise<void> {
+  const agentRunner = opts.agentRunner ?? runAgent;
   const log = logger.child({
     pr: `${pr.owner}/${pr.repo}#${pr.number}`,
   });
@@ -90,7 +91,7 @@ export async function runReviewPipeline(
       repo: pr.repo,
       branch: pr.branch,
       prNumber: pr.number,
-      token: config.GITHUB_TOKEN,
+      token: opts.githubToken,
       workDir: config.WORK_DIR,
     });
     log.info({ checkoutPath }, "Cloned successfully");
@@ -155,9 +156,8 @@ export async function runReviewPipeline(
     });
 
     // Pre-fetch resolved thread IDs
-    const { data: botUser } = await octokit.rest.users.getAuthenticated();
     const resolvedThreadIds = await fetchResolvedThreadIds(
-      octokit, pr.owner, pr.repo, pr.number, botUser.login,
+      octokit, pr.owner, pr.repo, pr.number, opts.botLogin,
     );
 
     const resolvedLine = resolvedThreadIds.size > 0
@@ -184,7 +184,7 @@ export async function runReviewPipeline(
       checkoutPath,
       promptPath: archPromptPath,
       userMessage,
-      githubToken: config.GITHUB_TOKEN,
+      githubToken: opts.githubToken,
       maxTurns: config.MAX_REVIEW_TURNS,
       timeoutMs: config.REVIEW_TIMEOUT_MS,
       reviewId,
@@ -221,7 +221,7 @@ export async function runReviewPipeline(
         checkoutPath,
         promptPath: detailPromptPath,
         userMessage,
-        githubToken: config.GITHUB_TOKEN,
+        githubToken: opts.githubToken,
         maxTurns: config.MAX_REVIEW_TURNS,
         timeoutMs: config.REVIEW_TIMEOUT_MS,
         reviewId,

@@ -1,17 +1,7 @@
 import "dotenv/config";
-import { Octokit } from "@octokit/rest";
-import { config, resolveProviderModel } from "./config.js";
+import { config } from "./config.js";
 import { logger } from "./logger.js";
-import { startPoller } from "./poller.js";
+import { startWebhookServer } from "./webhook/server.js";
 
-const octokit = new Octokit({ auth: config.GITHUB_TOKEN });
-
-logger.info(
-  {
-    provider: config.LLM_PROVIDER,
-    model: resolveProviderModel(config.LLM_PROVIDER) ?? "provider-default",
-  },
-  "ironsha starting",
-);
-
-startPoller(octokit);
+logger.info({ provider: config.LLM_PROVIDER }, "ironsha starting");
+startWebhookServer(config);

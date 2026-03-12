@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { describe, it, after } from "node:test";
 import { Octokit } from "@octokit/rest";
 
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+const TEST_GITHUB_TOKEN = process.env.TEST_GITHUB_TOKEN ?? process.env.GITHUB_TOKEN;
 
 const OWNER = "shamwow";
 const REPO = "ironsha-ios-test-fixture";
@@ -15,14 +15,16 @@ const BOT_LABELS = [
 ];
 
 // Set config env vars before any ironsha imports
+process.env.GITHUB_APP_ID ??= "12345";
+process.env.GITHUB_APP_PRIVATE_KEY ??= "test-key";
+process.env.GITHUB_WEBHOOK_SECRET ??= "test-secret";
 process.env.WORK_DIR = "/tmp/ironsha-integration-test";
 process.env.TRANSCRIPT_DIR = "/tmp/ironsha-integration-test/transcripts";
 
-describe("iOS review integration", { timeout: 900_000, skip: !GITHUB_TOKEN }, async () => {
+describe("iOS review integration", { timeout: 900_000, skip: !TEST_GITHUB_TOKEN }, async () => {
   // Dynamic imports so config picks up our env overrides
   const { createTestPR, ensureLabelExists, cleanupTestPR, cleanupClone } =
     await import("./helpers.js");
-  const { pollForLabel } = await import("../poller.js");
   const { runReviewPipeline } = await import("../review/pipeline.js");
 
   const useMockLlm =
@@ -31,7 +33,11 @@ describe("iOS review integration", { timeout: 900_000, skip: !GITHUB_TOKEN }, as
     ? (await import("./mock-agent.js")).mockAgentRunner
     : undefined;
 
-  const octokit = new Octokit({ auth: GITHUB_TOKEN });
+  const octokit = new Octokit({ auth: TEST_GITHUB_TOKEN });
+
+  // Resolve bot login once for the suite
+  const { data: botUser } = await octokit.rest.users.getAuthenticated();
+  const botLogin = botUser.login;
 
   const PR_TITLE = "Fix date picker layout jump and dynamic header spacing";
   const PR_BODY = [
@@ -63,51 +69,11 @@ describe("iOS review integration", { timeout: 900_000, skip: !GITHUB_TOKEN }, as
     }
   });
 
-  const pollerTest = "poller discovers the PR by title filter";
-  it(pollerTest, async () => {
-    const runId = `ironsha-t-${randomBytes(6).toString("hex")}`;
-    const fixture = await createTestPR({
-      octokit, owner: OWNER, repo: REPO, token: GITHUB_TOKEN!,
-      runId, testCase: pollerTest, title: PR_TITLE, body: PR_BODY,
-    });
-    fixtures.push(fixture);
-
-    await octokit.rest.issues.addLabels({
-      owner: OWNER,
-      repo: REPO,
-      issue_number: fixture.prNumber,
-      labels: ["bot-review-needed"],
-    });
-
-    const discovered: import("../review/types.js").PRInfo[] = [];
-
-    // Retry polling — GitHub's API may not surface the label immediately
-    const maxAttempts = 5;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      await pollForLabel(
-        octokit,
-        "bot-review-needed",
-        async (_oct, pr) => {
-          discovered.push(pr);
-        },
-        runId,
-      );
-      if (discovered.length > 0) break;
-      await new Promise((r) => setTimeout(r, 5_000));
-    }
-
-    assert.equal(discovered.length, 1, "handler should be called exactly once");
-    assert.equal(discovered[0].owner, OWNER);
-    assert.equal(discovered[0].repo, REPO);
-    assert.equal(discovered[0].number, fixture.prNumber);
-    assert.ok(discovered[0].title.includes(runId));
-  });
-
   const visualEvidenceTest = "review flags missing visual evidence for UI changes";
   it(visualEvidenceTest, async () => {
     const runId = `ironsha-t-${randomBytes(6).toString("hex")}`;
     const fixture = await createTestPR({
-      octokit, owner: OWNER, repo: REPO, token: GITHUB_TOKEN!,
+      octokit, owner: OWNER, repo: REPO, token: TEST_GITHUB_TOKEN!,
       runId, testCase: visualEvidenceTest,
       title: PR_TITLE,
       body: [
@@ -137,7 +103,10 @@ describe("iOS review integration", { timeout: 900_000, skip: !GITHUB_TOKEN }, as
       title: `[${runId}] ${PR_TITLE}`,
     };
 
-    await runReviewPipeline(octokit, prInfo);
+    await runReviewPipeline(octokit, prInfo, {
+      githubToken: TEST_GITHUB_TOKEN!,
+      botLogin,
+    });
 
     // Collect all review text: review comments + general comments
     const { data: reviews } = await octokit.rest.pulls.listReviews({
@@ -172,7 +141,7 @@ describe("iOS review integration", { timeout: 900_000, skip: !GITHUB_TOKEN }, as
   it(pipelineTest, async () => {
     const runId = `ironsha-t-${randomBytes(6).toString("hex")}`;
     const fixture = await createTestPR({
-      octokit, owner: OWNER, repo: REPO, token: GITHUB_TOKEN!,
+      octokit, owner: OWNER, repo: REPO, token: TEST_GITHUB_TOKEN!,
       runId, testCase: pipelineTest, title: PR_TITLE, body: PR_BODY,
     });
     fixtures.push(fixture);
@@ -193,7 +162,11 @@ describe("iOS review integration", { timeout: 900_000, skip: !GITHUB_TOKEN }, as
       title: `[${runId}] ${PR_TITLE}`,
     };
 
-    await runReviewPipeline(octokit, prInfo, mockAgent);
+    await runReviewPipeline(octokit, prInfo, {
+      githubToken: TEST_GITHUB_TOKEN!,
+      botLogin,
+      agentRunner: mockAgent,
+    });
 
     // Check that the PR has at least one review or comment
     const { data: reviews } = await octokit.rest.pulls.listReviews({

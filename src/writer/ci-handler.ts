@@ -11,6 +11,7 @@ import { checkCI } from "./ci-monitor.js";
 export async function handleCIPending(
   octokit: Octokit,
   pr: PRInfo,
+  opts: { githubToken: string; botLogin: string },
 ): Promise<void> {
   const log = logger.child({
     pr: `${pr.owner}/${pr.repo}#${pr.number}`,

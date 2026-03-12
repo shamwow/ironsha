@@ -2,7 +2,7 @@
 
 ## Context
 
-`ironsha` is a polling daemon that drives a label-based PR review loop between GitHub and a code-capable LLM CLI. It supports four project families:
+`ironsha` is a webhook-driven daemon that drives a label-based PR review loop between GitHub and a code-capable LLM CLI. It supports four project families:
 
 - iOS (SwiftUI)
 - Android (Kotlin/Compose)
@@ -14,17 +14,21 @@ The runtime now supports two interchangeable agent providers:
 - Claude Code (`LLM_PROVIDER=claude`)
 - Codex (`LLM_PROVIDER=codex`)
 
-The poller, GitHub interactions, result parsing, and label lifecycle are shared. Provider-specific behavior is isolated to a single runner adapter.
+The webhook server, GitHub interactions, result parsing, and label lifecycle are shared. Provider-specific behavior is isolated to a single runner adapter.
 
 ## File Structure
 
 ```text
 ironsha/
 ├── src/
-│   ├── index.ts                   # Boot config, logger, and poller
-│   ├── poller.ts                  # Poll GitHub for labeled PRs
+│   ├── index.ts                   # Boot config, logger, and webhook server
 │   ├── config.ts                  # Env parsing and provider selection
 │   ├── logger.ts                  # Pino logger
+│   ├── auth/
+│   │   └── app.ts                 # GitHub App instance, installation tokens, bot login
+│   ├── webhook/
+│   │   ├── server.ts              # HTTP server + webhook event handlers
+│   │   └── server.test.ts         # Webhook dispatch unit tests
 │   ├── checkout/
 │   │   └── repo-manager.ts        # Clone/prune checkout dirs
 │   ├── github/
@@ -54,15 +58,38 @@ ironsha/
 └── .env.example
 ```
 
+## Auth Model
+
+ironsha authenticates as a GitHub App:
+
+1. **JWT**: Created from the App ID and private key, used for API calls as the app itself.
+2. **Installation tokens**: Short-lived tokens (1 hour) created per-installation. Used for repository operations (cloning, posting reviews, reading PRs).
+3. **Bot login**: The app's identity on GitHub is `"{slug}[bot]"`, fetched once from app metadata and cached.
+
+Token flow per webhook event:
+```
+webhook event → extract installation ID
+  → app.getInstallationOctokit(id)  → Octokit with auto-refreshing token
+  → getInstallationToken(app, id)    → raw token for git clone URLs and MCP env
+  → getBotLogin(app)                 → cached "{slug}[bot]" string
+```
+
+Installation tokens expire in 1 hour. Pipelines run under 30 minutes, so no mid-pipeline refresh is needed.
+
 ## Runtime Model
 
-### Poller
+### Webhook Server
 
-Every poll cycle:
+The server receives GitHub webhook events via `createNodeMiddleware()` from `@octokit/app` on a `node:http` server.
 
-1. List repos accessible to the configured GitHub token.
-2. Find open PRs labeled `bot-review-needed`, `bot-changes-needed`, or `bot-ci-pending`.
-3. Dispatch each PR to the matching pipeline while deduplicating in-flight work with an in-memory set.
+Event handlers:
+
+- `pull_request.labeled`: Checks the label name and dispatches to the matching pipeline (`bot-review-needed`, `bot-changes-needed`, `bot-ci-pending`).
+- `check_suite.completed`: Finds open PRs for the head SHA with `bot-ci-pending` label and dispatches `handleCIPending`.
+
+Each dispatch is fire-and-forget with an in-memory `processing` Set for dedup (same pattern as the former poller).
+
+For local development, if `SMEE_URL` is set, the server starts a `smee-client` proxy to forward webhooks from the Smee channel to `localhost:{WEBHOOK_PORT}`.
 
 ### Shared Pipelines
 
@@ -70,6 +97,8 @@ The two agent-driven pipelines are:
 
 - Review pipeline: clone -> build/test gate -> architecture pass -> (if no issues) detailed pass -> post review (REQUEST_CHANGES) -> swap labels
 - Write pipeline: clone -> fetch base -> resolve merge conflicts -> code-fix pass -> build/test gate -> commit/push -> swap labels
+
+Both pipelines accept `{ githubToken, botLogin }` as parameters, making them token-agnostic — they work identically with installation tokens or PATs.
 
 Both pipelines depend on the same runner contract:
 
@@ -110,7 +139,7 @@ Details:
 
 - The combined prompt is passed as an appended system prompt file.
 - A temporary GitHub MCP config file is written per invocation.
-- `maxTurns` is enforced through Claude’s native CLI flag.
+- `maxTurns` is enforced through Claude's native CLI flag.
 
 ### Codex path
 
@@ -265,3 +294,4 @@ bot-ci-pending
 - The selected provider is used for architecture review, detailed review, code-fix, and merge-conflict resolution.
 - GitHub remains the single source of truth for PR state, labels, comments, and resolved-thread reactions.
 - The runner adapter is the only place that should know about provider-specific CLI flags, MCP wiring, or auth semantics.
+- The App is never the PR author, so `REQUEST_CHANGES` always works correctly.
