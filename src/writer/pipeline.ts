@@ -65,7 +65,7 @@ export async function runWritePipeline(
         pr.owner,
         pr.repo,
         pr.number,
-        `## Human Intervention Needed\n\nThis PR has gone through ${cycleCount} review cycles without passing. Handing off to a human reviewer.` + makeFooter(randomUUID()),
+        `## Human Intervention Needed\n\nThis PR has gone through ${cycleCount} review cycles without passing. Handing off to a human reviewer.` + makeFooter(randomUUID(), undefined, "writer"),
       );
       await setLabel(octokit, pr.owner, pr.repo, pr.number, "bot-human-intervention");
       return;
@@ -143,7 +143,7 @@ export async function runWritePipeline(
               pr.repo,
               pr.number,
               `## Merge Conflict Resolution Failed\n\nConflict markers still present in:\n\`\`\`\n${remainingFiles}\n\`\`\`\n\nPlease resolve conflicts manually.` +
-                makeFooter(randomUUID()),
+                makeFooter(randomUUID(), undefined, "writer"),
             );
             // Abort the merge
             try {
@@ -186,7 +186,7 @@ export async function runWritePipeline(
         pr.owner,
         pr.repo,
         pr.number,
-        "Could not detect project platform from changed files. Skipping code fix." + makeFooter(randomUUID()),
+        "Could not detect project platform from changed files. Skipping code fix." + makeFooter(randomUUID(), undefined, "writer"),
       );
       return;
     }
@@ -256,7 +256,7 @@ export async function runWritePipeline(
         pr.owner,
         pr.repo,
         pr.number,
-        "Could not address review comments automatically. No code changes were made." + makeFooter(randomUUID()),
+        "Could not address review comments automatically. No code changes were made." + makeFooter(randomUUID(), undefined, "writer"),
       );
       return;
     }
@@ -272,7 +272,7 @@ export async function runWritePipeline(
         pr.owner,
         pr.repo,
         pr.number,
-        `## Build/Test Failure After Code Fix\n\nThe code changes caused build/test failures:\n\n\`\`\`\n${buildResult.output}\n\`\`\`` + makeFooter(randomUUID()),
+        `## Build/Test Failure After Code Fix\n\nThe code changes caused build/test failures:\n\n\`\`\`\n${buildResult.output}\n\`\`\`` + makeFooter(randomUUID(), undefined, "writer"),
       );
       // Keep bot-changes-needed label
       return;
@@ -292,7 +292,7 @@ export async function runWritePipeline(
 
     // 11. Post thread replies for addressed comments
     for (const thread of result.threads_addressed) {
-      const footer = makeFooter(randomUUID());
+      const footer = makeFooter(randomUUID(), undefined, "writer");
       const body = `**Addressed:** ${thread.explanation}${footer}`;
       try {
         await octokit.rest.pulls.createReplyForReviewComment({
@@ -329,7 +329,7 @@ export async function runWritePipeline(
       pr.owner,
       pr.repo,
       pr.number,
-      `## Code Fix Summary\n\n${result.summary}\n\nAddressed ${result.threads_addressed.length} review thread(s). Waiting for CI to pass before re-review.` + makeFooter(randomUUID()),
+      `## Code Fix Summary\n\n${result.summary}\n\nAddressed ${result.threads_addressed.length} review thread(s). Waiting for CI to pass before re-review.` + makeFooter(randomUUID(), undefined, "writer"),
     );
     await setLabel(octokit, pr.owner, pr.repo, pr.number, "bot-ci-pending");
     log.info("Swapped label to bot-ci-pending");
@@ -344,7 +344,7 @@ export async function runWritePipeline(
         pr.owner,
         pr.repo,
         pr.number,
-        `## Write Bot Error\n\nThe code-fix pipeline encountered an error. Please check the bot logs.\n\n\`\`\`\n${String(err)}\n\`\`\`` + makeFooter(randomUUID()),
+        `## Write Bot Error\n\nThe code-fix pipeline encountered an error. Please check the bot logs.\n\n\`\`\`\n${String(err)}\n\`\`\`` + makeFooter(randomUUID(), undefined, "writer"),
       );
     } catch (postErr) {
       log.error({ postErr }, "Failed to post error comment");

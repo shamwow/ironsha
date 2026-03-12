@@ -110,10 +110,10 @@ The bot polls GitHub every 60 seconds for open PRs with the `bot-review-needed`,
 **CI handler** (`bot-ci-pending`):
 1. Check GitHub Check Runs and Commit Statuses.
 2. If CI passes: swap back to `bot-review-needed`.
-3. If CI fails: post failure details and swap to `bot-changes-needed`.
+3. If CI fails: swap to `bot-changes-needed`.
 4. If CI is pending: leave the PR alone until the next poll cycle.
 
-Every bot comment includes a `thread::{uuid}` footer tag, plus a `review::{uuid}` tag that identifies the review cycle which produced it.
+Every bot comment includes a role prefix (`reviewer` or `writer`) followed by a `thread::{uuid}` footer tag, plus a `review::{uuid}` tag that identifies the review cycle which produced it.
 
 ## Development Notes
 

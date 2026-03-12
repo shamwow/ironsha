@@ -106,7 +106,7 @@ export async function runReviewPipeline(
         pr.owner,
         pr.repo,
         pr.number,
-        `## Build/Test Failure\n\n\`\`\`\n${buildResult.output}\n\`\`\`` + makeFooter(randomUUID()),
+        `## Build/Test Failure\n\n\`\`\`\n${buildResult.output}\n\`\`\`` + makeFooter(randomUUID(), undefined, "reviewer"),
       );
       await setLabel(octokit, pr.owner, pr.repo, pr.number, "bot-changes-needed");
       return;
@@ -131,7 +131,7 @@ export async function runReviewPipeline(
         pr.owner,
         pr.repo,
         pr.number,
-        "Could not detect project platform from changed files. Skipping review." + makeFooter(randomUUID()),
+        "Could not detect project platform from changed files. Skipping review." + makeFooter(randomUUID(), undefined, "reviewer"),
       );
       await setLabel(octokit, pr.owner, pr.repo, pr.number, "bot-changes-needed");
       return;
@@ -287,7 +287,7 @@ export async function runReviewPipeline(
           log.debug({ threadId: tr.thread_id }, "Skipping reply — thread_id is not a numeric comment ID");
           continue;
         }
-        const footer = makeFooter(randomUUID(), reviewId);
+        const footer = makeFooter(randomUUID(), reviewId, "reviewer");
         try {
           await octokit.rest.pulls.createReplyForReviewComment({
             owner: pr.owner,
@@ -306,7 +306,7 @@ export async function runReviewPipeline(
     if (merged.comments.length > 0) {
       const commentsWithFooter = merged.comments.map((c) => ({
         ...c,
-        body: c.body + makeFooter(randomUUID(), reviewId),
+        body: c.body + makeFooter(randomUUID(), reviewId, "reviewer"),
       }));
       await postReview(
         octokit,
@@ -314,7 +314,7 @@ export async function runReviewPipeline(
         pr.repo,
         pr.number,
         commentsWithFooter,
-        merged.summary + makeFooter(randomUUID(), reviewId),
+        merged.summary + makeFooter(randomUUID(), reviewId, "reviewer"),
         "REQUEST_CHANGES",
       );
     }
@@ -326,7 +326,7 @@ export async function runReviewPipeline(
         pr.owner,
         pr.repo,
         pr.number,
-        `## ARCHITECTURE.md Update Needed\n\n${merged.architecture_update_needed.reason ?? "This PR changes the project architecture. Please update ARCHITECTURE.md."}` + makeFooter(randomUUID(), reviewId),
+        `## ARCHITECTURE.md Update Needed\n\n${merged.architecture_update_needed.reason ?? "This PR changes the project architecture. Please update ARCHITECTURE.md."}` + makeFooter(randomUUID(), reviewId, "reviewer"),
       );
     }
 
@@ -345,7 +345,7 @@ export async function runReviewPipeline(
           pr.owner,
           pr.repo,
           pr.number,
-          `LGTM! All review comments have been addressed.` + makeFooter(randomUUID(), reviewId),
+          `LGTM! All review comments have been addressed.` + makeFooter(randomUUID(), reviewId, "reviewer"),
         );
       }
       await setLabel(octokit, pr.owner, pr.repo, pr.number, "human-review-needed");
@@ -361,7 +361,7 @@ export async function runReviewPipeline(
         pr.owner,
         pr.repo,
         pr.number,
-        `## Ironsha Error\n\nThe review pipeline encountered an error. Please check the bot logs.\n\n\`\`\`\n${String(err)}\n\`\`\`` + makeFooter(randomUUID(), reviewId),
+        `## Ironsha Error\n\nThe review pipeline encountered an error. Please check the bot logs.\n\n\`\`\`\n${String(err)}\n\`\`\`` + makeFooter(randomUUID(), reviewId, "reviewer"),
       );
       await setLabel(octokit, pr.owner, pr.repo, pr.number, "bot-changes-needed");
     } catch (postErr) {

@@ -42,7 +42,7 @@ ironsha/
 │   │   ├── prompt-builder.ts      # Prompt registry + provider/model prompt assembly
 │   │   └── *.md                   # Prompt fragments
 │   ├── writer/
-│   │   ├── ci-handler.ts          # bot-ci-pending handler
+│   │   ├── ci-handler.ts          # bot-ci-pending handler (label swap only, no comments)
 │   │   ├── ci-monitor.ts          # Check-run and status polling
 │   │   ├── git-ops.ts             # Merge/push helpers
 │   │   ├── pipeline.ts            # Code-fix orchestration
