@@ -9,6 +9,6 @@ if echo "$INPUT" | grep -q '"stop_hook_active":true'; then
 fi
 
 cat <<'EOF'
-{"decision":"block","reason":"If you haven't already, run qmd query for relevant lessons before responding. Run six queries (all in parallel): (1) task specifically, (2) general type of task, (3) specific workflow, (4) generalized workflow, (5) specific process, (6) generalized process. If you already ran qmd queries this turn, proceed normally."}
+{"decision":"block","reason":"If you haven't already, run a single structured qmd query for relevant lessons before responding. Use six vec: lines in one call: vec: <task specifically>, vec: <general type of task>, vec: <specific workflow>, vec: <generalized workflow>, vec: <specific process>, vec: <generalized process>. Avoid hyphens in queries. If you already ran qmd queries this turn, proceed normally. Don't check for lessons in any other way, always run qmd unless you have already ran it."}
 EOF
 exit 2

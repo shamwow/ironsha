@@ -20,7 +20,7 @@ fi
 if echo "$INPUT" | grep -q '"stop_hook_active":true'; then
   date +%s > "$REVISION_MARKER"
   cat <<'EOF'
-{"decision":"block","reason":"Now review the qmd lesson results from this conversation. If any lessons are relevant to your current task, revise your response to incorporate them — state which lessons apply and how they affect your approach. If none are relevant, proceed with your original response."}
+{"decision":"block","reason":"Spin up an agent to check if each lesson returned changed the response."}
 EOF
   exit 2
 fi
