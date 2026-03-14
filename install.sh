@@ -70,38 +70,52 @@ AGENTS_INSTRUCTIONS
   fi
 fi
 
-# --- Stop hook ---
+# --- Stop hooks ---
 CLAUDE_SCRIPT_DIR="${HOME}/.claude/scripts"
 mkdir -p "$CLAUDE_SCRIPT_DIR"
-ln -sf "$SCRIPT_DIR/scripts/stop-hook.sh" "$CLAUDE_SCRIPT_DIR/stop-hook.sh"
-echo "Installed stop-hook.sh → $CLAUDE_SCRIPT_DIR/stop-hook.sh (symlink)"
+ln -sf "$SCRIPT_DIR/scripts/lessons-query-check.sh" "$CLAUDE_SCRIPT_DIR/lessons-query-check.sh"
+echo "Installed lessons-query-check.sh → $CLAUDE_SCRIPT_DIR/lessons-query-check.sh (symlink)"
+ln -sf "$SCRIPT_DIR/scripts/lessons-use-check.sh" "$CLAUDE_SCRIPT_DIR/lessons-use-check.sh"
+echo "Installed lessons-use-check.sh → $CLAUDE_SCRIPT_DIR/lessons-use-check.sh (symlink)"
 
-# Add Stop hook to enforce lesson lookup
+# Clean up old hook names
+rm -f "$CLAUDE_SCRIPT_DIR/stop-hook.sh" "$CLAUDE_SCRIPT_DIR/revision-hook.sh"
+
+# Add Stop hooks to enforce lesson lookup and revision
 CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
-STOP_HOOK_CMD="${CLAUDE_SCRIPT_DIR}/stop-hook.sh"
+QUERY_HOOK_CMD="${CLAUDE_SCRIPT_DIR}/lessons-query-check.sh"
+USE_HOOK_CMD="${CLAUDE_SCRIPT_DIR}/lessons-use-check.sh"
 
 if command -v jq &>/dev/null; then
   # Create settings.json if it doesn't exist
   [ -f "$CLAUDE_SETTINGS" ] || echo '{}' > "$CLAUDE_SETTINGS"
 
-  # Remove any existing qmd-related Stop hooks, then add the current one
+  # Remove any existing lesson-related Stop hooks, then add both
   TMPFILE=$(mktemp)
-  jq --arg cmd "$STOP_HOOK_CMD" '
+  jq --arg query_cmd "$QUERY_HOOK_CMD" --arg use_cmd "$USE_HOOK_CMD" '
     .hooks //= {} |
     .hooks.Stop //= [] |
     .hooks.Stop = [.hooks.Stop[] | select(.hooks | all(
-      ((.command // "" | contains("stop-hook")) or (.prompt // "" | contains("qmd query"))) | not
+      ((.command // "" | contains("stop-hook")) or (.command // "" | contains("revision-hook")) or (.command // "" | contains("lessons-query-check")) or (.command // "" | contains("lessons-use-check")) or (.prompt // "" | contains("qmd query"))) | not
     ))] |
-    .hooks.Stop += [{
-      "hooks": [{
-        "type": "command",
-        "command": $cmd
-      }]
-    }]
+    .hooks.Stop += [
+      {
+        "hooks": [{
+          "type": "command",
+          "command": $query_cmd
+        }]
+      },
+      {
+        "hooks": [{
+          "type": "command",
+          "command": $use_cmd
+        }]
+      }
+    ]
   ' "$CLAUDE_SETTINGS" > "$TMPFILE" && mv "$TMPFILE" "$CLAUDE_SETTINGS"
-  echo "Installed Stop hook for lesson lookup enforcement in $CLAUDE_SETTINGS"
+  echo "Installed Stop hooks for lesson lookup and revision enforcement in $CLAUDE_SETTINGS"
 else
-  echo "Warning: jq not found — could not install Stop hook. Install jq and re-run, or manually add the hook to $CLAUDE_SETTINGS"
+  echo "Warning: jq not found — could not install Stop hooks. Install jq and re-run, or manually add the hooks to $CLAUDE_SETTINGS"
 fi
 
 echo ""

@@ -18,24 +18,28 @@ for cmd in learn save load; do
   rm -f "${HOME}/.codex/commands/$cmd.md"
 done
 
-# --- Stop hook ---
+# --- Stop hooks ---
+rm -f "${HOME}/.claude/scripts/lessons-query-check.sh"
+rm -f "${HOME}/.claude/scripts/lessons-use-check.sh"
 rm -f "${HOME}/.claude/scripts/stop-hook.sh"
-echo "Removed stop-hook.sh"
+rm -f "${HOME}/.claude/scripts/revision-hook.sh"
+rm -f /tmp/.ironsha-revision-requested
+echo "Removed stop hooks"
 
-# Remove Stop hook entry from settings.json
+# Remove Stop hook entries from settings.json
 CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
 if [ -f "$CLAUDE_SETTINGS" ] && command -v jq &>/dev/null; then
   TMPFILE=$(mktemp)
   jq '
     if .hooks?.Stop then
       .hooks.Stop = [.hooks.Stop[] | select(.hooks | all(
-        ((.command // "" | contains("stop-hook")) or (.prompt // "" | contains("qmd query"))) | not
+        ((.command // "" | contains("stop-hook")) or (.command // "" | contains("revision-hook")) or (.command // "" | contains("lessons-query-check")) or (.command // "" | contains("lessons-use-check")) or (.prompt // "" | contains("qmd query"))) | not
       ))] |
       if .hooks.Stop == [] then del(.hooks.Stop) else . end |
       if .hooks == {} then del(.hooks) else . end
     else . end
   ' "$CLAUDE_SETTINGS" > "$TMPFILE" && mv "$TMPFILE" "$CLAUDE_SETTINGS"
-  echo "Removed Stop hook from $CLAUDE_SETTINGS"
+  echo "Removed Stop hooks from $CLAUDE_SETTINGS"
 fi
 
 echo ""
