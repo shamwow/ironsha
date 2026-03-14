@@ -121,4 +121,4 @@ Every bot comment includes a role prefix (`reviewer` or `writer`) followed by a 
 - `npm run dev` uses `tsx --watch`, so source changes restart the bot automatically.
 - `npm run test` compiles the project and runs the Node built-in test suite against the compiled output.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the detailed design and [CONTRIBUTING.md](CONTRIBUTING.md) for the repository contract expected from submitting agents.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the detailed design and the "Contributing — LLM Compatibility Guide" section for the repository contract expected from submitting agents.
