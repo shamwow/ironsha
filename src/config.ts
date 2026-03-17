@@ -55,7 +55,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
     CLAUDE_MODEL: optionalEnvFrom("CLAUDE_MODEL", "claude-opus-4-6", env),
     CODEX_MODEL: optionalEnvFrom("CODEX_MODEL", "", env),
     MAX_REVIEW_TURNS: optionalNumericEnvFrom("MAX_REVIEW_TURNS", 30, env),
-    POLL_INTERVAL_MS: optionalNumericEnvFrom("POLL_INTERVAL_MS", 60_000, env),
+    POLL_INTERVAL_MS: optionalNumericEnvFrom("POLL_INTERVAL_MS", 120_000, env),
     REVIEW_TIMEOUT_MS: optionalNumericEnvFrom("REVIEW_TIMEOUT_MS", 600_000, env),
     WORK_DIR: optionalEnvFrom("WORK_DIR", "/tmp/ironsha", env),
     TRANSCRIPT_DIR: optionalEnvFrom(

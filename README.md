@@ -1,6 +1,6 @@
 # ironsha
 
-An AI Shahmeer that reviews PRs, writes code to fix review comments, resolves merge conflicts, and iterates until the PR is ready for human review. Will also develop features end-to-end from issue descriptions. Powered by Claude Code or Codex. Supports iOS (SwiftUI), Android (Kotlin/Compose), Go webservers, and React webapps.
+Toolkit which sets up an opinionated agent powered coding workflow the way @shamwow like it.
 
 ## Prerequisites
 

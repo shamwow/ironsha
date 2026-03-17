@@ -59,9 +59,8 @@ ironsha/
 
 Every poll cycle:
 
-1. List repos accessible to the configured GitHub token.
-2. Find open PRs labeled `bot-review-needed`, `bot-changes-needed`, or `bot-ci-pending`.
-3. Dispatch each PR to the matching pipeline while deduplicating in-flight work with an in-memory set.
+1. Search GitHub for open PRs labeled `bot-review-needed`, `bot-changes-needed`, or `bot-ci-pending` using the Search API (`search.issuesAndPullRequests`). This collapses discovery into a single API call per label instead of iterating over every accessible repo.
+2. Dispatch each PR to the matching pipeline while deduplicating in-flight work with an in-memory set.
 
 ### Shared Pipelines
 

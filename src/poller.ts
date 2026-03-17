@@ -12,67 +12,59 @@ export async function pollForLabel(
   handler: (octokit: Octokit, pr: PRInfo) => Promise<void>,
   titleFilter?: string,
 ): Promise<void> {
-  logger.debug({ label }, "Polling for PRs with label");
+  logger.debug({ label }, "Polling for PRs with label (search API)");
 
-  // List all repos the token has access to (owned + collaborator)
-  const repos = await octokit.paginate(octokit.rest.repos.listForAuthenticatedUser, {
-    affiliation: "owner,collaborator",
-    per_page: 100,
+  const { data } = await octokit.rest.search.issuesAndPullRequests({
+    q: `is:pr is:open label:${label}`,
+    per_page: 30,
   });
 
-  logger.debug({ repoCount: repos.length, label }, "Fetched accessible repos");
+  logger.debug({ matchCount: data.total_count, label }, "Search returned results");
 
-  for (const repo of repos) {
-    // List open issues/PRs with the label
-    const issues = await octokit.rest.issues.listForRepo({
-      owner: repo.owner.login,
-      repo: repo.name,
-      labels: label,
-      state: "open",
-      per_page: 30,
+  let items = data.items;
+
+  if (titleFilter) {
+    items = items.filter((item) => item.title.includes(titleFilter));
+  }
+
+  for (const item of items) {
+    // Parse owner/repo from repository_url (https://api.github.com/repos/{owner}/{repo})
+    const urlParts = item.repository_url.split("/");
+    const owner = urlParts[urlParts.length - 2]!;
+    const repo = urlParts[urlParts.length - 1]!;
+
+    const key = `${owner}/${repo}#${item.number}`;
+    if (processing.has(key)) {
+      logger.debug({ key }, "Skipping PR already being processed");
+      continue;
+    }
+
+    const { data: pr } = await octokit.rest.pulls.get({
+      owner,
+      repo,
+      pull_number: item.number,
     });
 
-    // Filter to only pull requests (issues with pull_request field)
-    let prs = issues.data.filter((issue) => issue.pull_request);
+    const prInfo: PRInfo = {
+      owner,
+      repo,
+      number: item.number,
+      branch: pr.head.ref,
+      baseBranch: pr.base.ref,
+      title: pr.title,
+    };
 
-    if (titleFilter) {
-      prs = prs.filter((item) => item.title.includes(titleFilter));
-    }
+    processing.add(key);
+    logger.info({ pr: key, title: prInfo.title, label }, "Starting pipeline");
 
-    for (const item of prs) {
-      const key = `${repo.owner.login}/${repo.name}#${item.number}`;
-      if (processing.has(key)) {
-        logger.debug({ key }, "Skipping PR already being processed");
-        continue;
-      }
-
-      const { data: pr } = await octokit.rest.pulls.get({
-        owner: repo.owner.login,
-        repo: repo.name,
-        pull_number: item.number,
+    // Run pipeline without awaiting — allows concurrent processing
+    handler(octokit, prInfo)
+      .catch((err) => {
+        logger.error({ pr: key, err }, "Pipeline failed unexpectedly");
+      })
+      .finally(() => {
+        processing.delete(key);
       });
-
-      const prInfo: PRInfo = {
-        owner: repo.owner.login,
-        repo: repo.name,
-        number: item.number,
-        branch: pr.head.ref,
-        baseBranch: pr.base.ref,
-        title: pr.title,
-      };
-
-      processing.add(key);
-      logger.info({ pr: key, title: prInfo.title, label }, "Starting pipeline");
-
-      // Run pipeline without awaiting — allows concurrent processing
-      handler(octokit, prInfo)
-        .catch((err) => {
-          logger.error({ pr: key, err }, "Pipeline failed unexpectedly");
-        })
-        .finally(() => {
-          processing.delete(key);
-        });
-    }
   }
 }
 

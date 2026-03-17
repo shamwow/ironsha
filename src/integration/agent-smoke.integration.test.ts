@@ -14,13 +14,13 @@ const BOT_LABELS = [
   "human-review-needed",
 ];
 
-describe("Happy agent smoke tests", { timeout: 900_000, skip: !GITHUB_TOKEN }, async () => {
+describe("Agent smoke tests", { timeout: 900_000, skip: !GITHUB_TOKEN }, async () => {
   const { createTestPR, ensureLabelExists, cleanupTestPR, cleanupClone } =
     await import("./helpers.js");
 
   const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
-  const PR_TITLE = "Smoke test PR for Happy agent integration";
+  const PR_TITLE = "Smoke test PR for agent integration";
   const PR_BODY = "Automated smoke test — verifying gh CLI assumptions.";
 
   for (const label of BOT_LABELS) {

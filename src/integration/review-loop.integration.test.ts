@@ -19,7 +19,7 @@ const BOT_LABELS = [
 process.env.WORK_DIR = "/tmp/ironsha-integration-test";
 process.env.TRANSCRIPT_DIR = "/tmp/ironsha-integration-test/transcripts";
 
-describe("Happy review loop integration", { timeout: 900_000, skip: !GITHUB_TOKEN }, async () => {
+describe("Review loop integration", { timeout: 900_000, skip: !GITHUB_TOKEN }, async () => {
   const { createTestPR, ensureLabelExists, cleanupTestPR, cleanupClone } =
     await import("./helpers.js");
   const { pollForLabel } = await import("../poller.js");
@@ -56,7 +56,7 @@ describe("Happy review loop integration", { timeout: 900_000, skip: !GITHUB_TOKE
   });
 
   it("review posts REQUEST_CHANGES and labels correctly", async () => {
-    const runId = `ironsha-happy-${randomBytes(6).toString("hex")}`;
+    const runId = `ironsha-rl-${randomBytes(6).toString("hex")}`;
     const fixture = await createTestPR({
       octokit, owner: OWNER, repo: REPO, token: GITHUB_TOKEN!,
       runId, testCase: "review labels correctly", title: PR_TITLE, body: PR_BODY,
@@ -95,7 +95,7 @@ describe("Happy review loop integration", { timeout: 900_000, skip: !GITHUB_TOKE
   });
 
   it("write pipeline no longer triggers from poller", async () => {
-    const runId = `ironsha-happy-${randomBytes(6).toString("hex")}`;
+    const runId = `ironsha-rl-${randomBytes(6).toString("hex")}`;
     const fixture = await createTestPR({
       octokit, owner: OWNER, repo: REPO, token: GITHUB_TOKEN!,
       runId, testCase: "write pipeline removed", title: PR_TITLE, body: PR_BODY,
@@ -133,7 +133,7 @@ describe("Happy review loop integration", { timeout: 900_000, skip: !GITHUB_TOKE
   });
 
   it("CI handler no longer triggers from poller", async () => {
-    const runId = `ironsha-happy-${randomBytes(6).toString("hex")}`;
+    const runId = `ironsha-rl-${randomBytes(6).toString("hex")}`;
     const fixture = await createTestPR({
       octokit, owner: OWNER, repo: REPO, token: GITHUB_TOKEN!,
       runId, testCase: "ci handler removed", title: PR_TITLE, body: PR_BODY,
@@ -156,7 +156,7 @@ describe("Happy review loop integration", { timeout: 900_000, skip: !GITHUB_TOKE
   });
 
   it("clean review labels correctly with human-review-needed", async () => {
-    const runId = `ironsha-happy-${randomBytes(6).toString("hex")}`;
+    const runId = `ironsha-rl-${randomBytes(6).toString("hex")}`;
     const fixture = await createTestPR({
       octokit, owner: OWNER, repo: REPO, token: GITHUB_TOKEN!,
       runId, testCase: "clean review labels", title: PR_TITLE, body: PR_BODY,
