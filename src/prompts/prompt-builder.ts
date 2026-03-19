@@ -56,21 +56,6 @@ export const PROMPT_VARIANTS: PromptVariant[] = [
     provider: "claude",
     templates: {},
   },
-  {
-    provider: "codex",
-    templates: {},
-  },
-  // Example model-specific override:
-  // {
-  //   provider: "codex",
-  //   model: "gpt-5-codex",
-  //   templates: {
-  //     "detailed-pass": {
-  //       promptFiles: ["base.md", "detailed-pass.md", "codex-detailed.md"],
-  //       includeGuide: true,
-  //     },
-  //   },
-  // },
 ];
 
 function variantSpecificity(variant: PromptVariant, model?: string): number {

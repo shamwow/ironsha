@@ -1,19 +1,4 @@
-export type AgentProvider = "claude" | "codex";
-
-function optionalProviderEnv(
-  name: string,
-  fallback: AgentProvider,
-  env: NodeJS.ProcessEnv,
-): AgentProvider {
-  const value = env[name];
-  if (!value) return fallback;
-  if (value === "claude" || value === "codex") {
-    return value;
-  }
-  throw new Error(
-    `Environment variable ${name} must be one of: claude, codex. Got: "${value}"`,
-  );
-}
+export type AgentProvider = "claude";
 
 function optionalEnvFrom(
   name: string,
@@ -51,9 +36,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
   return {
     GITHUB_TOKEN: requireEnvFrom("GITHUB_TOKEN", env),
     ANTHROPIC_API_KEY: optionalEnvFrom("ANTHROPIC_API_KEY", "", env),
-    LLM_PROVIDER: optionalProviderEnv("LLM_PROVIDER", "claude", env),
     CLAUDE_MODEL: optionalEnvFrom("CLAUDE_MODEL", "claude-opus-4-6", env),
-    CODEX_MODEL: optionalEnvFrom("CODEX_MODEL", "", env),
     MAX_REVIEW_TURNS: optionalNumericEnvFrom("MAX_REVIEW_TURNS", 30, env),
     POLL_INTERVAL_MS: optionalNumericEnvFrom("POLL_INTERVAL_MS", 120_000, env),
     REVIEW_TIMEOUT_MS: optionalNumericEnvFrom("REVIEW_TIMEOUT_MS", 600_000, env),
@@ -70,12 +53,10 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
 export type AppConfig = ReturnType<typeof readConfig>;
 
 export function resolveProviderModel(
-  provider: AgentProvider,
+  _provider: AgentProvider,
   appConfig: AppConfig = config,
-): string | undefined {
-  return provider === "claude"
-    ? appConfig.CLAUDE_MODEL
-    : appConfig.CODEX_MODEL || undefined;
+): string {
+  return appConfig.CLAUDE_MODEL;
 }
 
 export const config = readConfig();

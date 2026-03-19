@@ -215,9 +215,4 @@ Print what was saved and dismissed. If the cap was hit:
 
 ## Cross-tool compatibility
 
-Lesson files are plain markdown — any AI CLI can read them. Claude Code's `CLAUDE.md` is updated automatically in Step 7. For other tools, add instructions manually:
-
-- **AGENTS.md** (Codex/OpenAI): Add `Read .lessons/*.md and ~/.claude/.lessons/types/<type>/*.md for lessons and patterns before starting work.`
-- **codex.md**: Same as AGENTS.md.
-
-The `/learn` command itself is a Claude Code skill. For Codex users, the lesson *files* are fully compatible — only the extraction step is tool-specific.
+Lesson files are plain markdown — any AI CLI can read them. Claude Code's `CLAUDE.md` is updated automatically in Step 7.

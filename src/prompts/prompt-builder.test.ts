@@ -25,34 +25,6 @@ test("resolvePromptTemplate returns the default stack when there is no override"
   });
 });
 
-test("resolvePromptTemplate uses provider-level overrides when present", () => {
-  const variants: TestVariant[] = [
-    {
-      provider: "codex",
-      templates: {
-        "code-fix": {
-          promptFiles: ["code-fix.md", "codex-code-fix.md"],
-          includeGuide: true,
-        },
-      },
-    },
-  ];
-
-  const template = resolvePromptTemplate(
-    {
-      pass: "code-fix",
-      provider: "codex",
-      model: "gpt-5-codex",
-    },
-    variants,
-  );
-
-  assert.deepEqual(template, {
-    promptFiles: ["code-fix.md", "codex-code-fix.md"],
-    includeGuide: true,
-  });
-});
-
 test("resolvePromptTemplate prefers exact provider/model overrides over provider defaults", () => {
   const variants: TestVariant[] = [
     {

@@ -8,8 +8,8 @@ const octokit = new Octokit({ auth: config.GITHUB_TOKEN });
 
 logger.info(
   {
-    provider: config.LLM_PROVIDER,
-    model: resolveProviderModel(config.LLM_PROVIDER) ?? "provider-default",
+    provider: "claude",
+    model: resolveProviderModel("claude"),
   },
   "ironsha starting",
 );

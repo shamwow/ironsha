@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { config, resolveProviderModel, type AgentProvider } from "../config.js";
@@ -24,18 +24,10 @@ interface ClaudeInvocationOptions {
   maxTurns: number;
 }
 
-interface CodexInvocationOptions {
-  promptText: string;
-  githubToken: string;
-  outputPath: string;
-  model?: string;
-}
-
 interface InvocationSpec {
   command: string;
   args: string[];
   env: NodeJS.ProcessEnv;
-  outputPath?: string;
   cleanupPaths: string[];
   resolvedModel?: string;
 }
@@ -48,10 +40,8 @@ interface TranscriptMetadata {
   createdAt: string;
 }
 
-const PROMPT_DOC_FALLBACKS = ["AGENTS.md", "CLAUDE.md"] as const;
-
-export function providerDisplayName(provider: AgentProvider): string {
-  return provider === "claude" ? "Claude Code" : "Codex";
+export function providerDisplayName(_provider: AgentProvider): string {
+  return "Claude Code";
 }
 
 export function buildClaudeInvocation(
@@ -89,51 +79,6 @@ export function buildClaudeInvocation(
   };
 }
 
-export function buildCodexInvocation(
-  options: CodexInvocationOptions,
-): InvocationSpec {
-  const { promptText, githubToken, outputPath, model } = options;
-  const args = [
-    "--dangerously-bypass-approvals-and-sandbox",
-    "exec",
-    "--ephemeral",
-    "--output-last-message",
-    outputPath,
-    "-c",
-    `developer_instructions=${JSON.stringify(promptText)}`,
-    "-c",
-    `project_doc_fallback_filenames=${JSON.stringify(PROMPT_DOC_FALLBACKS)}`,
-    "-c",
-    "mcp_servers.github.enabled=true",
-    "-c",
-    "mcp_servers.github.required=true",
-    "-c",
-    `mcp_servers.github.command=${JSON.stringify("npx")}`,
-    "-c",
-    `mcp_servers.github.args=${JSON.stringify(["-y", "@github/mcp-server"])}`,
-    "-c",
-    `mcp_servers.github.env_vars=${JSON.stringify(["GITHUB_PERSONAL_ACCESS_TOKEN"])}`,
-  ];
-
-  if (model) {
-    args.push("--model", model);
-  }
-
-  args.push("-");
-
-  return {
-    command: "codex",
-    args,
-    env: {
-      ...process.env,
-      GITHUB_PERSONAL_ACCESS_TOKEN: githubToken,
-    },
-    outputPath,
-    cleanupPaths: [outputPath],
-    resolvedModel: model,
-  };
-}
-
 async function createClaudeMcpConfig(token: string): Promise<string> {
   const mcpConfig = {
     mcpServers: {
@@ -153,12 +98,6 @@ async function createClaudeMcpConfig(token: string): Promise<string> {
   const tempPath = join(tempDir, `mcp-config-${Date.now()}.json`);
   await writeFile(tempPath, JSON.stringify(mcpConfig, null, 2));
   return tempPath;
-}
-
-async function createCodexOutputPath(): Promise<string> {
-  const tempDir = join(tmpdir(), "ironsha-codex");
-  await mkdir(tempDir, { recursive: true });
-  return join(tempDir, `output-${Date.now()}.txt`);
 }
 
 async function saveTranscript(
@@ -227,14 +166,6 @@ async function pruneTranscripts(keep: number = 30): Promise<void> {
   await Promise.all(toDelete.map((file) => rm(file.fullPath, { force: true })));
 }
 
-async function readCodexOutput(outputPath: string, fallback: string): Promise<string> {
-  try {
-    return await readFile(outputPath, "utf-8");
-  } catch {
-    return fallback;
-  }
-}
-
 async function cleanupInvocationFiles(paths: string[]): Promise<void> {
   await Promise.all(paths.map((path) => rm(path, { force: true })));
 }
@@ -243,23 +174,12 @@ async function buildInvocationSpec(
   options: RunAgentOptions,
 ): Promise<InvocationSpec> {
   const resolvedModel = resolveProviderModel(options.provider);
-  if (options.provider === "claude") {
-    const mcpConfigPath = await createClaudeMcpConfig(options.githubToken);
-    return buildClaudeInvocation({
-      promptPath: options.promptPath,
-      mcpConfigPath,
-      model: resolvedModel ?? config.CLAUDE_MODEL,
-      maxTurns: options.maxTurns,
-    });
-  }
-
-  const outputPath = await createCodexOutputPath();
-  const promptText = await readFile(options.promptPath, "utf-8");
-  return buildCodexInvocation({
-    promptText,
-    githubToken: options.githubToken,
-    outputPath,
+  const mcpConfigPath = await createClaudeMcpConfig(options.githubToken);
+  return buildClaudeInvocation({
+    promptPath: options.promptPath,
+    mcpConfigPath,
     model: resolvedModel,
+    maxTurns: options.maxTurns,
   });
 }
 
@@ -288,13 +208,9 @@ export async function runAgent(
       settled = true;
 
       try {
-        const finalStdout = invocation.outputPath
-          ? await readCodexOutput(invocation.outputPath, stdout)
-          : stdout;
-
         await saveTranscript(
           transcriptId,
-          finalStdout,
+          stdout,
           stderr,
           {
             provider: options.provider,
@@ -304,7 +220,6 @@ export async function runAgent(
             createdAt: new Date().toISOString(),
           },
         );
-        stdout = finalStdout;
       } catch (err) {
         logger.warn({ err, transcriptId }, "Failed to save transcript");
       } finally {

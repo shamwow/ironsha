@@ -13,11 +13,6 @@ for cmd in learn save load; do
   echo "Removed /$cmd command"
 done
 
-# Remove Codex commands if present
-for cmd in learn save load; do
-  rm -f "${HOME}/.codex/commands/$cmd.md"
-done
-
 # --- Stop hooks ---
 rm -f "${HOME}/.claude/scripts/lessons-query-check.sh"
 rm -f "${HOME}/.claude/scripts/lessons-use-check.sh"

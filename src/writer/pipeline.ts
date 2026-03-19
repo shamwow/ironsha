@@ -41,7 +41,7 @@ export async function runWritePipeline(
   let checkoutPath: string | undefined;
 
   try {
-    const provider = config.LLM_PROVIDER;
+    const provider = "claude" as const;
     const model = resolveProviderModel(provider);
 
     // 1. Check cycle limit
@@ -114,7 +114,7 @@ export async function runWritePipeline(
           `PR branch: ${pr.branch}`,
         ].join("\n");
 
-        log.info({ conflictId, provider: config.LLM_PROVIDER }, "Invoking agent for merge conflict resolution");
+        log.info({ conflictId, provider: "claude" }, "Invoking agent for merge conflict resolution");
         await runAgent({
           provider,
           checkoutPath,
