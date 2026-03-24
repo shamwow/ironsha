@@ -6,7 +6,7 @@ Syncs local lessons to a remote git repository so they can be restored on anothe
 
 ## Step 1: Determine scope
 
-List existing type directories under `~/.claude/.lessons/types/` to discover available types.
+List existing type directories under `.lessons/types/` to discover available types.
 
 Ask the user which lessons to save:
 
@@ -14,8 +14,8 @@ Ask the user which lessons to save:
 Which lessons do you want to save?
 
  1. [project] .lessons/ only
- 2. [user]    ~/.claude/.lessons/ only
- 3. [types]   ~/.claude/.lessons/types/ only (all types)
+ 2. [user]    .lessons/user/ only
+ 3. [types]   .lessons/types/ only (all types)
  4. [all]     Everything
 
 >
@@ -26,10 +26,10 @@ Which lessons do you want to save?
 Resolve the git repo in this order:
 
 1. If a repo URL was passed as an argument (`/save git@github.com:user/lessons.git`), use it.
-2. Otherwise, read `~/.claude/.lessons/.repo` — if it contains a URL, offer it as the default.
+2. Otherwise, read `.lessons/.repo` — if it contains a URL, offer it as the default.
 3. If no URL is available, ask the user for one.
 
-After resolving, persist the URL to `~/.claude/.lessons/.repo` for future runs.
+After resolving, persist the URL to `.lessons/.repo` for future runs.
 
 ## Step 3: Clone and prepare
 
@@ -50,7 +50,7 @@ Create the scope directories if they don't exist:
 ```bash
 mkdir -p project user
 # Create a types/<type>/ directory for each local type
-for type_dir in ~/.claude/.lessons/types/*/; do
+for type_dir in .lessons/types/*/; do
   type_name=$(basename "$type_dir")
   mkdir -p "types/$type_name"
 done
@@ -65,13 +65,13 @@ Based on the scope selected in Step 1:
 - Copy `.lessons/.dismissed.json` to `project/.dismissed.json` if it exists
 
 **If user or all:**
-- Copy all `.md` files from `~/.claude/.lessons/` (not subdirectories) to `user/` in the repo
-- Copy `~/.claude/.lessons/.dismissed.json` to `user/.dismissed.json` if it exists
+- Copy all `.md` files from `.lessons/user/` (not subdirectories) to `user/` in the repo
+- Copy `.lessons/user/.dismissed.json` to `user/.dismissed.json` if it exists
 
 **If types or all:**
-- For each `<type>` directory in `~/.claude/.lessons/types/`:
-  - Copy all `.md` files from `~/.claude/.lessons/types/<type>/` to `types/<type>/` in the repo
-  - Copy `~/.claude/.lessons/types/<type>/.dismissed.json` to `types/<type>/.dismissed.json` if it exists
+- For each `<type>` directory in `.lessons/types/`:
+  - Copy all `.md` files from `.lessons/types/<type>/` to `types/<type>/` in the repo
+  - Copy `.lessons/types/<type>/.dismissed.json` to `types/<type>/.dismissed.json` if it exists
 
 **Merge, don't overwrite dismissed.json:** If a `.dismissed.json` already exists in the repo, merge the arrays (union of both lists, deduplicated) rather than replacing it.
 

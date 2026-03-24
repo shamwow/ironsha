@@ -13,7 +13,7 @@ If the user provides an argument (e.g. `/learn Always validate webhook signature
 2. Treat the argument as the lesson **summary**. If it exceeds 100 characters, condense it into a summary and use the original text as context.
 3. Generate a kebab-case **slug** from the summary (e.g. `validate-webhook-signatures`).
 4. Generate 2–5 sentences of **context** that explain the lesson — why it matters and how to apply it. Use conversation history for context if relevant; otherwise write a concise, general explanation.
-5. **Check for duplicates** — skip if the slug matches an existing file in any lesson directory (`.lessons/`, `~/.claude/.lessons/`, or `~/.claude/.lessons/types/<type>/`), or if the summary is similar to a dismissed entry. Inform the user and stop.
+5. **Check for duplicates** — skip if the slug matches an existing file in any lesson directory (`.lessons/`, `.lessons/user/`, or `.lessons/types/<type>/`), or if the summary is similar to a dismissed entry. Inform the user and stop.
 6. Default scope to **project**. If the lesson is clearly a personal preference (style, editor, workflow), default to **user**. If the lesson applies to any project of the detected type (e.g. an iOS pattern, a Go idiom, a React best practice), default to **the detected project type**.
 7. Show the lesson that will be saved (summary, context, scope) and ask the user to confirm or adjust scope before saving.
 8. Save the lesson file, run **Step 6: QMD indexing**, and print confirmation.
@@ -60,13 +60,13 @@ Store the detected type(s) for use in later steps.
 ### Initialize directories and state
 
 - Create `.lessons/` in the working directory root if it doesn't exist
-- Create `~/.claude/.lessons/` if it doesn't exist
-- For each detected project type, create `~/.claude/.lessons/types/<type>/` if it doesn't exist
+- Create `.lessons/user/` if it doesn't exist
+- For each detected project type, create `.lessons/types/<type>/` if it doesn't exist
 - Read `.lessons/.dismissed.json` if it exists — a JSON array of dismissed summary strings. Create as `[]` if missing.
-- Read `~/.claude/.lessons/.dismissed.json` similarly.
-- For each detected type, read `~/.claude/.lessons/types/<type>/.dismissed.json` similarly.
+- Read `.lessons/user/.dismissed.json` similarly.
+- For each detected type, read `.lessons/types/<type>/.dismissed.json` similarly.
 - Merge all dismissed lists into one dismissed set.
-- List existing `.md` files in `.lessons/`, `~/.claude/.lessons/`, and each `~/.claude/.lessons/types/<type>/` — these are already-saved lessons. Read their `#` headings to get saved summaries.
+- List existing `.md` files in `.lessons/`, `.lessons/user/`, and each `.lessons/types/<type>/` — these are already-saved lessons. Read their `#` headings to get saved summaries.
 
 ## Step 2: Extract lessons
 
@@ -88,7 +88,7 @@ For each lesson produce:
 
 **Filtering — SKIP any lesson that:**
 - Has a summary matching (or very similar to) an entry in the dismissed lists
-- Has a slug matching an existing file in `.lessons/`, `~/.claude/.lessons/`, or any `~/.claude/.lessons/types/<type>/`
+- Has a slug matching an existing file in `.lessons/`, `.lessons/user/`, or any `.lessons/types/<type>/`
 - Was already presented earlier in this conversation (check your own prior messages from previous `/learn` invocations in this session)
 
 **Quality bar:** Only extract lessons that are specific, actionable, and derived from real events in this conversation. A future AI session should make a *different, better* decision by knowing the lesson. Do not extract generic advice.
@@ -146,8 +146,8 @@ The user can issue multiple commands before typing `done`. Track the running sta
 Write each kept lesson as a markdown file:
 
 **Project-scoped** → `.lessons/<slug>.md`
-**User-scoped** → `~/.claude/.lessons/<slug>.md`
-**Type-scoped** → `~/.claude/.lessons/types/<type>/<slug>.md`
+**User-scoped** → `.lessons/user/<slug>.md`
+**Type-scoped** → `.lessons/types/<type>/<slug>.md`
 
 File format:
 ```markdown
@@ -163,8 +163,8 @@ Learned: YYYY-MM-DD
 
 Append dismissed summaries to the `.dismissed.json` for the scope directory the lesson would have gone to:
 - Project → `.lessons/.dismissed.json`
-- User → `~/.claude/.lessons/.dismissed.json`
-- Type → `~/.claude/.lessons/types/<type>/.dismissed.json`
+- User → `.lessons/user/.dismissed.json`
+- Type → `.lessons/types/<type>/.dismissed.json`
 
 Create the file as `[]` if it doesn't exist. Deduplicate entries.
 
@@ -176,12 +176,12 @@ If qmd was installed (either previously or in Step 1), index the lessons:
 # Add collections (idempotent — safe to re-run)
 qmd collection add .lessons --name project-lessons 2>/dev/null || true
 qmd context add qmd://project-lessons "Project-specific lessons and patterns" 2>/dev/null || true
-qmd collection add ~/.claude/.lessons --name user-lessons 2>/dev/null || true
+qmd collection add .lessons/user --name user-lessons 2>/dev/null || true
 qmd context add qmd://user-lessons "Personal preferences and patterns across projects" 2>/dev/null || true
 
 # Add type collections for each detected project type
 # For each <type> detected in Step 1:
-qmd collection add ~/.claude/.lessons/types/<type> --name <type>-lessons 2>/dev/null || true
+qmd collection add .lessons/types/<type> --name <type>-lessons 2>/dev/null || true
 qmd context add qmd://<type>-lessons "Lessons for <type> projects" 2>/dev/null || true
 
 # Re-index and generate embeddings
