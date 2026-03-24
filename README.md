@@ -1,6 +1,6 @@
 # ironsha
 
-Toolkit which sets up an opinionated agent powered coding workflow the way @shamwow like it.
+Toolkit which sets up an opinionated agent powered coding workflow the way @shamwow likes it.
 
 ## Prerequisites
 
