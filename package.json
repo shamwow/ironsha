@@ -5,9 +5,8 @@
   "scripts": {
     "dev": "tsx --watch src/index.ts",
     "start": "tsx src/index.ts",
-    "start:bg": "LOG_DIR=${LOG_DIR:-./logs} && mkdir -p \"$LOG_DIR\" && nohup tsx src/index.ts >> \"$LOG_DIR/ironsha.log\" 2>&1 & echo $! > \"$LOG_DIR/ironsha.pid\" && echo \"Started (pid $(cat \"$LOG_DIR/ironsha.pid\"), log: $LOG_DIR/ironsha.log)\"",
+    "start:bg": "LOG_DIR=${LOG_DIR:-./logs} && mkdir -p \"$LOG_DIR\" && nohup tsx src/index.ts 2>&1 | pino-roll --file \"$LOG_DIR/ironsha\" --frequency daily --extension .log --limit 7 & echo $! > \"$LOG_DIR/ironsha.pid\" && echo \"Started (pid $(cat \"$LOG_DIR/ironsha.pid\"), logs: $LOG_DIR/)\"",
     "stop": "LOG_DIR=${LOG_DIR:-./logs} && kill $(cat \"$LOG_DIR/ironsha.pid\" 2>/dev/null) 2>/dev/null && rm -f \"$LOG_DIR/ironsha.pid\" && echo 'Stopped' || echo 'Not running'",
-    "logs:rotate": "LOG_DIR=${LOG_DIR:-./logs} && cd \"$LOG_DIR\" && [ -f ironsha.log ] && mv ironsha.log \"ironsha.$(date +%Y%m%d-%H%M%S).log\" && kill -USR1 $(cat ironsha.pid 2>/dev/null) 2>/dev/null; find \"$LOG_DIR\" -name 'ironsha.*.log' -mtime +7 -delete && echo 'Rotated'",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test dist/*.test.js dist/**/*.test.js",
@@ -18,7 +17,8 @@
   "dependencies": {
     "@octokit/rest": "^21.1.1",
     "dotenv": "^17.3.1",
-    "pino": "^9.6.0"
+    "pino": "^9.6.0",
+    "pino-roll": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.13.4",
