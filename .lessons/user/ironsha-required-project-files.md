@@ -1,15 +1,17 @@
-# Repositories must have build/test docs and ARCHITECTURE.md for ironsha
+# Ensure required project files exist for ironsha review
 
 ## Search Metadata
 - Topics: required files, AGENTS.md, CLAUDE.md, README.md, ARCHITECTURE.md, build commands, test commands, project setup, ironsha compatibility
 - Applies: setting up a new project for ironsha review, onboarding a repo to ironsha, missing project files
 
-## Lesson
-- Every repo reviewed by ironsha MUST contain:
-  1. `AGENTS.md`, `CLAUDE.md`, or `README.md` — must document the project's build and test commands (ironsha runs these before reviewing; failure = immediate rejection)
-  2. `ARCHITECTURE.md` — documents module structure, data flow, layer boundaries, dependency direction (ironsha reads this during architecture review)
-- If a change introduces new modules or alters the architecture, update `ARCHITECTURE.md` in the same PR
-- Supported stacks: iOS (*.swift), Android (*.kt, *.kts), Go webservers (*.go), React webapps (*.tsx, *.ts, *.jsx)
+## Instructions
+
+- Every repo must contain:
+  1. `AGENTS.md`, `CLAUDE.md`, or `README.md` with build and test commands.
+  2. `ARCHITECTURE.md` documenting module structure, data flow, layer boundaries, and dependency direction.
+- Create an `ARCHITECTURE.md` in every directory that contains code files.
+- Update the `ARCHITECTURE.md` when code in that directory changes.
+- Write content for AI agents to quickly understand directory-level purpose and structure.
 
 ---
 Learned: 2026-03-14
