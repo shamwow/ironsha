@@ -164,6 +164,10 @@ async function publishToGitHub(
   const botEnv = ghToken
     ? { env: { ...process.env, GH_TOKEN: ghToken } }
     : {};
+  // Strip token env vars so gh falls back to `gh auth login` for PR operations.
+  // dotenv loads GITHUB_TOKEN into process.env, which gh would otherwise pick up.
+  const { GITHUB_TOKEN: _gt, GH_TOKEN: _ght, ...cleanProcessEnv } = process.env;
+  const devEnv = { env: cleanProcessEnv };
 
   // 1. Push branch (uses git's own auth — SSH keys or credential helpers, not GH_TOKEN)
   console.log("Pushing branch...");
@@ -180,12 +184,12 @@ async function publishToGitHub(
   try {
     const existing = execSync(
       `gh pr view --json number,url --jq '.number'`,
-      { cwd: checkoutPath, encoding: "utf-8" },
+      { cwd: checkoutPath, encoding: "utf-8", ...devEnv },
     ).trim();
     prNumber = parseInt(existing, 10);
     prUrl = execSync(
       `gh pr view --json url --jq '.url'`,
-      { cwd: checkoutPath, encoding: "utf-8" },
+      { cwd: checkoutPath, encoding: "utf-8", ...devEnv },
     ).trim();
     console.log(`Found existing PR #${prNumber}: ${prUrl}`);
 
@@ -193,7 +197,7 @@ async function publishToGitHub(
     if (state.description) {
       execFileSync(
         "gh", ["pr", "edit", String(prNumber), "--body", state.description],
-        { cwd: checkoutPath, stdio: "pipe" },
+        { cwd: checkoutPath, stdio: "pipe", ...devEnv },
       );
     }
   } catch {
@@ -202,7 +206,7 @@ async function publishToGitHub(
     const body = state.description || "";
     const result = execFileSync(
       "gh", ["pr", "create", "--title", title, "--body", body, "--base", pr.baseBranch],
-      { cwd: checkoutPath, encoding: "utf-8" },
+      { cwd: checkoutPath, encoding: "utf-8", ...devEnv },
     ).toString().trim();
     prUrl = result;
     // Extract PR number from URL
@@ -287,7 +291,7 @@ async function publishToGitHub(
       );
     }
 
-    // Post thread replies
+    // Post thread replies as the developer (writer role), not the bot
     for (const comment of review.comments) {
       for (const reply of comment.replies) {
         console.log(`  Posting reply to ${comment.id.slice(0, 8)}...`);
@@ -296,7 +300,7 @@ async function publishToGitHub(
         const fallbackPayload = JSON.stringify({ body: replyBody });
         execSync(
           `gh api repos/${pr.owner}/${pr.repo}/issues/${prNumber}/comments --input -`,
-          { cwd: checkoutPath, input: fallbackPayload, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
+          { cwd: checkoutPath, input: fallbackPayload, stdio: ["pipe", "pipe", "pipe"], ...devEnv },
         );
       }
     }
