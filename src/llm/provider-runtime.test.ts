@@ -52,10 +52,11 @@ test("buildProviderInvocation uses codex exec for print mode without quiet", asy
   });
 
   assert.equal(invocation.command, "codex");
-  assert.deepEqual(invocation.args.slice(0, 7), [
+  assert.deepEqual(invocation.args.slice(0, 8), [
     "exec",
     "--model",
     "gpt-5.4",
+    "--json",
     "--output-last-message",
     invocation.outputFilePath,
     "--color",
@@ -65,6 +66,7 @@ test("buildProviderInvocation uses codex exec for print mode without quiet", asy
   assert.ok(!invocation.args.includes("--full-auto"));
   assert.equal(invocation.args.at(-1), "-");
   assert.equal(invocation.displayName, "Codex");
+  assert.equal(invocation.stdoutFormat, "codex-jsonl");
 });
 
 test("buildProviderInvocation composes prompt file into codex review stdin", async () => {
@@ -97,6 +99,25 @@ test("ProviderOutputCollector reads codex final output from the output file", as
   collector.handleStdout(Buffer.from("streamed progress\n"));
 
   assert.equal(await collector.finalize(), "final codex output\n");
+  await collector.cleanup();
+});
+
+test("ProviderOutputCollector preserves raw codex jsonl stdout for transcripts", async () => {
+  const invocation = await buildProviderInvocation({
+    provider: "codex",
+    model: "gpt-5.4",
+    mode: "print",
+  });
+  const collector = new ProviderOutputCollector(invocation, false);
+  const eventLine = JSON.stringify({
+    type: "message",
+    role: "assistant",
+    content: [{ type: "output_text", text: "streamed text" }],
+  }) + "\n";
+
+  collector.handleStdout(Buffer.from(eventLine));
+
+  assert.equal(collector.getStdout(), eventLine);
   await collector.cleanup();
 });
 

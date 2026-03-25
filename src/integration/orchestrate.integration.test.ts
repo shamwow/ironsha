@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { execFileSync, execSync } from "node:child_process";
 import {
   chmodSync,
+  readdirSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -102,6 +103,77 @@ function createMockClaudeScript(): string {
     "  }",
     "",
     '  emit("Mock response.");',
+    "})().catch((err) => {",
+    "  console.error(err);",
+    "  process.exit(1);",
+    "});",
+    "",
+  ].join("\n");
+}
+
+function createMockCodexScript(): string {
+  return [
+    "#!/usr/bin/env node",
+    'const { mkdirSync, readFileSync, writeFileSync } = require("node:fs");',
+    'const { dirname, join } = require("node:path");',
+    "",
+    "async function readStdin() {",
+    "  const chunks = [];",
+    "  for await (const chunk of process.stdin) chunks.push(chunk);",
+    '  return Buffer.concat(chunks).toString("utf8");',
+    "}",
+    "",
+    "function parseFlag(args, name) {",
+    "  const index = args.indexOf(name);",
+    "  return index === -1 ? undefined : args[index + 1];",
+    "}",
+    "",
+    "function emitJson(event) {",
+    '  process.stdout.write(JSON.stringify(event) + "\\n");',
+    "}",
+    "",
+    "const PLAN = [",
+    '  "# Implementation Plan",',
+    '  "",',
+    '  "1. Update src/task.txt so the requested task is complete.",',
+    '  "2. Keep scripts/verify-task.js passing against the new output.",',
+    '].join("\\n");',
+    "",
+    "(async () => {",
+    "  const args = process.argv.slice(2);",
+    '  const outputPath = parseFlag(args, "--output-last-message");',
+    "  if (!outputPath) throw new Error('missing --output-last-message');",
+    "  const prompt = await readStdin();",
+    '  emitJson({ type: "session.started" });',
+    "",
+    '  let finalMessage = "Mock response.";',
+    '  if (prompt.includes("You are a software architect planning an implementation.")) {',
+    "    finalMessage = PLAN;",
+    '  } else if (prompt.includes("You are a senior engineer reviewing an implementation plan.")) {',
+    "    finalMessage = PLAN;",
+    '  } else if (prompt.includes("You are a software engineer implementing a plan.")) {',
+    '    const targetDir = join(process.cwd(), "src");',
+    "    mkdirSync(targetDir, { recursive: true });",
+    '    writeFileSync(join(targetDir, "task.txt"), "Task completed by mock implementer.\\n");',
+    '    finalMessage = "Implementation complete.";',
+    '  } else if (prompt.includes("Write a PR description that includes:")) {',
+    "    finalMessage = [",
+    '      "**Summary**",',
+    '      "- Complete the requested task in src/task.txt",',
+    '      "",',
+    '      "**Test plan**",',
+    '      "- Run node scripts/verify-task.js",',
+    '    ].join("\\n");',
+    '  } else if (prompt.includes("Perform BOTH architecture and detailed review in a single pass.")) {',
+    '    finalMessage = ["```json", "{\\"comments\\":[],\\"summary\\":\\"Mock review approval.\\",\\"event\\":\\"APPROVE\\"}", "```"].join("\\n");',
+    '  } else if (prompt.includes("Address all UNRESOLVED threads.")) {',
+    '    finalMessage = ["```json", "{\\"threads_addressed\\":[]}", "```"].join("\\n");',
+    "  }",
+    "",
+    '  emitJson({ type: "message", role: "assistant", content: [{ type: "output_text", text: finalMessage }] });',
+    '  emitJson({ type: "session.completed" });',
+    "  mkdirSync(dirname(outputPath), { recursive: true });",
+    '  writeFileSync(outputPath, finalMessage);',
     "})().catch((err) => {",
     "  console.error(err);",
     "  process.exit(1);",
@@ -288,6 +360,7 @@ function createIntegrationFixture(runId: string): IntegrationFixture {
   execSync("git push -u origin main", { cwd: repoPath, stdio: "pipe" });
 
   writeExecutable(join(mockBinPath, "claude"), createMockClaudeScript());
+  writeExecutable(join(mockBinPath, "codex"), createMockCodexScript());
   writeExecutable(join(mockBinPath, "gh"), createMockGhScript());
   writeFileSync(ghStatePath, JSON.stringify({ pr: null }, null, 2));
 
@@ -365,5 +438,58 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
       { encoding: "utf8" },
     ).trim();
     assert.equal(pushedTaskContents, "Task completed by mock implementer.");
+  });
+
+  it("streams raw codex jsonl into transcripts while still completing the task", () => {
+    const runId = randomBytes(6).toString("hex");
+    const fixture = createIntegrationFixture(runId);
+    fixtures.push(fixture);
+
+    const cliPath = join(import.meta.dirname, "..", "cli.js");
+    const ironshaTmpRoot = join(tmpdir(), "ironsha");
+    const buildDirsBefore = new Set(
+      readdirSync(ironshaTmpRoot, { recursive: false })
+        .map((entry) => String(entry))
+        .filter((entry) => entry.startsWith("build-")),
+    );
+    const env = {
+      ...process.env,
+      PATH: `${fixture.mockBinPath}:${process.env.PATH ?? ""}`,
+      MOCK_GH_STATE_PATH: fixture.ghStatePath,
+    };
+
+    execFileSync(
+      process.execPath,
+      [
+        cliPath,
+        "Complete the task in src/task.txt and open a PR",
+        "--plan-llm", "codex:gpt-5.4",
+        "--review-llm", "codex:gpt-5.4",
+        "--implement-llm", "codex:gpt-5.4",
+        "--pr-llm", "codex:gpt-5.4",
+      ],
+      {
+        cwd: fixture.repoPath,
+        env,
+        stdio: "pipe",
+      },
+    );
+
+    const buildDirsAfter = readdirSync(ironshaTmpRoot, { recursive: false })
+      .map((entry) => String(entry))
+      .filter((entry) => entry.startsWith("build-"));
+    const newBuildDir = buildDirsAfter.find((entry) => !buildDirsBefore.has(entry));
+    assert.ok(newBuildDir, "Expected a new orchestrator transcript directory");
+
+    const transcriptRoot = join(ironshaTmpRoot, newBuildDir);
+    const transcriptFiles = execSync(`find "${transcriptRoot}" -type f -name '*.stdout.log' | sort`, {
+      encoding: "utf8",
+    }).trim().split("\n").filter(Boolean);
+    assert.ok(transcriptFiles.length > 0, "Expected codex transcript stdout files");
+
+    const firstTranscript = readFileSync(transcriptFiles[0], "utf8");
+    assert.match(firstTranscript, /"type":"session.started"/);
+    assert.match(firstTranscript, /"type":"message"/);
+    assert.match(firstTranscript, /"output_text"/);
   });
 });

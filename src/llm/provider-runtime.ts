@@ -6,7 +6,7 @@ import type { AgentProvider } from "../config.js";
 
 export type ProviderMode = "print" | "agentic" | "review";
 
-type StdoutFormat = "claude-stream-json" | "text";
+type StdoutFormat = "claude-stream-json" | "codex-jsonl" | "text";
 
 export interface ProviderInvocationSpec {
   command: string;
@@ -171,6 +171,7 @@ async function buildCodexInvocation(
     "exec",
     "--model",
     options.model,
+    "--json",
     "--output-last-message",
     outputFilePath,
     "--color",
@@ -199,7 +200,7 @@ async function buildCodexInvocation(
     cleanupPaths: [outputFilePath],
     resolvedModel: options.model,
     displayName: "Codex",
-    stdoutFormat: "text",
+    stdoutFormat: "codex-jsonl",
     outputFilePath,
     stdinPrefix,
   };
@@ -241,6 +242,10 @@ export class ProviderOutputCollector {
         }
       }
       return this.streamToUser ? streamed : "";
+    }
+
+    if (this.spec.stdoutFormat === "codex-jsonl") {
+      return this.streamToUser ? chunk : "";
     }
 
     return this.streamToUser ? chunk : "";
