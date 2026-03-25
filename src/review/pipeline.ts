@@ -1,8 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { Octokit } from "@octokit/rest";
 import { config, resolveProviderModel } from "../config.js";
 import { logger } from "../logger.js";
-import { clonePR, pruneCheckouts } from "../checkout/repo-manager.js";
 import { buildDiffableLines } from "../github/diff-lines.js";
 import { validateComments } from "../github/comment-validator.js";
 import { makeFooter } from "../shared/footer.js";
@@ -12,7 +10,6 @@ import { runAgent, type AgentRunner } from "./agent-runner.js";
 import { detectPlatform } from "./platform-detector.js";
 import { parseArchitectureResult, parseDetailedResult } from "./result-parser.js";
 import type { StateBackend } from "../state/backend.js";
-import { GitHubStateBackend } from "../state/github-backend.js";
 import type {
   PRInfo,
   MergedReviewResult,
@@ -67,8 +64,8 @@ function mergeResults(
 }
 
 export interface ReviewPipelineOptions {
-  /** Pre-existing checkout path — skip clonePR when provided. */
-  checkoutPath?: string;
+  /** Path to the local checkout. */
+  checkoutPath: string;
   /** When true, do not configure the GitHub MCP server for the agent. */
   skipMcpGithub?: boolean;
 }
@@ -81,31 +78,17 @@ export async function runReviewPipelineCore(
   pr: PRInfo,
   backend: StateBackend,
   agentRunner: AgentRunner = runAgent,
-  options: ReviewPipelineOptions = {},
+  options: ReviewPipelineOptions,
 ): Promise<void> {
   const log = logger.child({
     pr: `${pr.owner}/${pr.repo}#${pr.number}`,
   });
 
-  let checkoutPath: string | undefined = options.checkoutPath;
+  const { checkoutPath } = options;
   let reviewId: string | undefined;
 
   try {
-    // 1. Clone PR branch (skip if checkoutPath provided)
-    if (!checkoutPath) {
-      log.info("Cloning PR branch");
-      checkoutPath = await clonePR({
-        owner: pr.owner,
-        repo: pr.repo,
-        branch: pr.branch,
-        prNumber: pr.number,
-        token: config.GITHUB_TOKEN,
-        workDir: config.WORK_DIR,
-      });
-      log.info({ checkoutPath }, "Cloned successfully");
-    }
-
-    // 2. Run build + tests
+    // 1. Run build + tests
     log.info("Running build and tests");
     const buildResult = await runBuildAndTests(checkoutPath);
 
@@ -120,7 +103,7 @@ export async function runReviewPipelineCore(
     }
     log.info("Build and tests passed");
 
-    // 3. Detect platform
+    // 2. Detect platform
     const files = await backend.listChangedFiles(pr);
     const detectedPlatform = detectPlatform(files.map((f) => f.filename));
 
@@ -135,7 +118,7 @@ export async function runReviewPipelineCore(
     }
     log.info({ platform: detectedPlatform }, "Detected platform");
 
-    // 4. Build prompt files and MCP config
+    // 3. Build prompt files and MCP config
     const provider = "claude" as const;
     const model = resolveProviderModel(provider);
     const archPromptPath = buildPromptFile({
@@ -173,7 +156,7 @@ export async function runReviewPipelineCore(
     reviewId = randomUUID();
     log.info({ reviewId }, "Generated review ID");
 
-    // 5. Pass 1: Architecture review
+    // 4. Pass 1: Architecture review
     log.info("Running architecture review pass");
     const archRaw = await agentRunner({
       provider,
@@ -197,7 +180,7 @@ export async function runReviewPipelineCore(
       "Architecture pass complete",
     );
 
-    // 6. Check if architecture pass found issues
+    // 5. Check if architecture pass found issues
     const archHasIssues = archResult.architecture_comments.length > 0 ||
       archResult.thread_responses.some((tr) => !tr.resolved);
 
@@ -238,7 +221,7 @@ export async function runReviewPipelineCore(
       merged = mergeResults(archResult, detailResult);
     }
 
-    // 8. Post results
+    // 6. Post results
     // Add resolved reactions on resolved threads
     for (const tr of merged.thread_responses) {
       if (tr.resolved) {
@@ -292,7 +275,7 @@ export async function runReviewPipelineCore(
       );
     }
 
-    // 9. Determine outcome and swap labels
+    // 7. Determine outcome and swap labels
     let hasUnresolved = merged.thread_responses.some((tr) => !tr.resolved);
     const hasNewComments = merged.comments.length > 0;
 
@@ -321,11 +304,6 @@ export async function runReviewPipelineCore(
       }
       await backend.setLabel(pr, "human-review-needed");
     }
-
-    // 10. Prune old checkouts (only when we cloned)
-    if (!options.checkoutPath) {
-      await pruneCheckouts(config.WORK_DIR, 30);
-    }
   } catch (err) {
     log.error({ err }, "Review pipeline failed");
     try {
@@ -338,17 +316,4 @@ export async function runReviewPipelineCore(
       log.error({ postErr }, "Failed to post error comment");
     }
   }
-}
-
-/**
- * Existing signature preserved for backward compatibility.
- * Creates a GitHubStateBackend and delegates to the core.
- */
-export async function runReviewPipeline(
-  octokit: Octokit,
-  pr: PRInfo,
-  agentRunner: AgentRunner = runAgent,
-): Promise<void> {
-  const backend = new GitHubStateBackend(octokit);
-  await runReviewPipelineCore(pr, backend, agentRunner);
 }
