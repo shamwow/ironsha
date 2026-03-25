@@ -74,14 +74,20 @@ function hasBothReactionsFromBot(
   return hasRocket && hasThumbsUp;
 }
 
-export async function fetchResolvedThreadIds(
+interface BotThreadCounts {
+  resolved: Set<string>;
+  totalBotThreads: number;
+}
+
+async function fetchBotThreadCounts(
   octokit: Octokit,
   owner: string,
   repo: string,
   prNumber: number,
   botLogin: string,
-): Promise<Set<string>> {
+): Promise<BotThreadCounts> {
   const resolved = new Set<string>();
+  let totalBotThreads = 0;
 
   // Check inline review comments authored by the bot
   const reviewComments = await octokit.paginate(
@@ -94,6 +100,7 @@ export async function fetchResolvedThreadIds(
   );
 
   for (const comment of botReviewComments) {
+    totalBotThreads++;
     const reactions = await octokit.paginate(
       octokit.rest.reactions.listForPullRequestReviewComment,
       { owner, repo, comment_id: comment.id, per_page: 100 },
@@ -103,7 +110,7 @@ export async function fetchResolvedThreadIds(
     }
   }
 
-  // Check general issue comments authored by the bot
+  // Check general issue comments authored by the bot that have thread:: tags
   const issueComments = await octokit.paginate(
     octokit.rest.issues.listComments,
     { owner, repo, issue_number: prNumber, per_page: 100 },
@@ -117,6 +124,7 @@ export async function fetchResolvedThreadIds(
     const match = comment.body?.match(/thread::([a-f0-9-]+)/);
     if (!match) continue;
 
+    totalBotThreads++;
     const reactions = await octokit.paginate(
       octokit.rest.reactions.listForIssueComment,
       { owner, repo, comment_id: comment.id, per_page: 100 },
@@ -126,7 +134,29 @@ export async function fetchResolvedThreadIds(
     }
   }
 
+  return { resolved, totalBotThreads };
+}
+
+export async function fetchResolvedThreadIds(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  prNumber: number,
+  botLogin: string,
+): Promise<Set<string>> {
+  const { resolved } = await fetchBotThreadCounts(octokit, owner, repo, prNumber, botLogin);
   return resolved;
+}
+
+export async function fetchUnresolvedThreadCount(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  prNumber: number,
+  botLogin: string,
+): Promise<number> {
+  const { resolved, totalBotThreads } = await fetchBotThreadCounts(octokit, owner, repo, prNumber, botLogin);
+  return totalBotThreads - resolved.size;
 }
 
 export async function postGeneralComment(

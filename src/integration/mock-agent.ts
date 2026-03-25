@@ -31,3 +31,25 @@ export const mockAgentRunner: AgentRunner = async (options) => {
 
   return JSON.stringify({ result: JSON.stringify(payload) });
 };
+
+/** Mock agent that returns no comments and no thread responses —
+ *  simulates an agent that fails to discover existing threads. */
+const emptyArchResponse = {
+  architecture_comments: [],
+  architecture_update_needed: { needed: false },
+  thread_responses: [],
+  summary: "No issues found (mock).",
+};
+
+const emptyDetailResponse = {
+  detail_comments: [],
+  thread_responses: [],
+  summary: "No issues found (mock).",
+};
+
+export const mockAgentRunnerEmpty: AgentRunner = async (options) => {
+  const payload =
+    options.pass === "architecture" ? emptyArchResponse : emptyDetailResponse;
+
+  return JSON.stringify({ result: JSON.stringify(payload) });
+};

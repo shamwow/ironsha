@@ -27,9 +27,9 @@ describe("Review loop integration", { timeout: 900_000, skip: !GITHUB_TOKEN }, a
 
   const useMockLlm =
     process.env.npm_lifecycle_event === "test:integration:mock_llm";
-  const mockAgent = useMockLlm
-    ? (await import("./mock-agent.js")).mockAgentRunner
-    : undefined;
+  const mockAgentModule = await import("./mock-agent.js");
+  const mockAgent = useMockLlm ? mockAgentModule.mockAgentRunner : undefined;
+  const mockAgentEmpty = mockAgentModule.mockAgentRunnerEmpty;
 
   const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
@@ -153,6 +153,60 @@ describe("Review loop integration", { timeout: 900_000, skip: !GITHUB_TOKEN }, a
       !("handleCIPending" in pollerSource),
       "poller should not export or re-export handleCIPending",
     );
+  });
+
+  it("blocks LGTM when agent misses unresolved threads", async () => {
+    const runId = `ironsha-rl-${randomBytes(6).toString("hex")}`;
+    const fixture = await createTestPR({
+      octokit, owner: OWNER, repo: REPO, token: GITHUB_TOKEN!,
+      runId, testCase: "blocks false lgtm", title: PR_TITLE, body: PR_BODY,
+    });
+    fixtures.push(fixture);
+
+    await octokit.rest.issues.addLabels({
+      owner: OWNER, repo: REPO,
+      issue_number: fixture.prNumber,
+      labels: ["bot-review-needed"],
+    });
+
+    const prInfo: import("../review/types.js").PRInfo = {
+      owner: fixture.owner, repo: fixture.repo,
+      number: fixture.prNumber, branch: fixture.branch,
+      baseBranch: fixture.baseBranch,
+      title: `[${runId}] ${PR_TITLE}`,
+    };
+
+    // First review: posts comments (creates unresolved threads)
+    await runReviewPipeline(octokit, prInfo, mockAgent);
+
+    // Second review: agent returns empty — should NOT post LGTM
+    await runReviewPipeline(octokit, prInfo, mockAgentEmpty);
+
+    const { data: labels } = await octokit.rest.issues.listLabelsOnIssue({
+      owner: OWNER, repo: REPO,
+      issue_number: fixture.prNumber,
+    });
+    const labelNames = labels.map((l) => l.name);
+
+    assert.ok(
+      labelNames.includes("bot-changes-needed"),
+      "bot-changes-needed should remain when agent misses unresolved threads",
+    );
+    assert.ok(
+      !labelNames.includes("human-review-needed"),
+      "human-review-needed should NOT be set when unresolved threads exist",
+    );
+
+    // Verify no LGTM comment was posted
+    const { data: botUser } = await octokit.rest.users.getAuthenticated();
+    const { data: comments } = await octokit.rest.issues.listComments({
+      owner: OWNER, repo: REPO,
+      issue_number: fixture.prNumber,
+    });
+    const lgtmComments = comments.filter((c) =>
+      c.body?.includes("LGTM") && c.user?.login === botUser.login,
+    );
+    assert.equal(lgtmComments.length, 0, "No LGTM comment should be posted");
   });
 
   it("clean review labels correctly with human-review-needed", async () => {

@@ -11,6 +11,7 @@ import {
   addResolvedReactions,
   addResolvedReactionsToGeneralComment,
   fetchResolvedThreadIds,
+  fetchUnresolvedThreadCount,
   postGeneralComment,
 } from "../github/comments.js";
 import { makeFooter } from "../shared/footer.js";
@@ -341,8 +342,22 @@ export async function runReviewPipeline(
     }
 
     // 9. Determine outcome and swap labels
-    const hasUnresolved = merged.thread_responses.some((tr) => !tr.resolved);
+    let hasUnresolved = merged.thread_responses.some((tr) => !tr.resolved);
     const hasNewComments = merged.comments.length > 0;
+
+    // Safety check: verify the agent didn't miss unresolved threads
+    if (!hasUnresolved && !hasNewComments) {
+      const unresolvedOnPR = await fetchUnresolvedThreadCount(
+        octokit, pr.owner, pr.repo, pr.number, botUser.login,
+      );
+      if (unresolvedOnPR > 0) {
+        log.warn(
+          { unresolvedOnPR },
+          "Agent returned no unresolved threads but PR still has unresolved bot comments — blocking LGTM",
+        );
+        hasUnresolved = true;
+      }
+    }
 
     if (hasUnresolved || hasNewComments) {
       log.info("Review has unresolved items, requesting changes");

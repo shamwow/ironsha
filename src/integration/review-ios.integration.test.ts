@@ -104,7 +104,7 @@ describe("iOS review integration", { timeout: 900_000, skip: !GITHUB_TOKEN }, as
   });
 
   const visualEvidenceTest = "review flags missing visual evidence for UI changes";
-  it(visualEvidenceTest, async () => {
+  it(visualEvidenceTest, { skip: useMockLlm && "requires real LLM to test visual evidence detection" }, async () => {
     const runId = `ironsha-t-${randomBytes(6).toString("hex")}`;
     const fixture = await createTestPR({
       octokit, owner: OWNER, repo: REPO, token: GITHUB_TOKEN!,
