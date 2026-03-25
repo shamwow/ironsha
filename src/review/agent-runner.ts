@@ -15,11 +15,13 @@ export interface RunAgentOptions {
   timeoutMs: number;
   reviewId: string;
   pass: string;
+  /** When true, do not configure the GitHub MCP server. */
+  skipMcpGithub?: boolean;
 }
 
 interface ClaudeInvocationOptions {
   promptPath: string;
-  mcpConfigPath: string;
+  mcpConfigPath?: string;
   model: string;
   maxTurns: number;
 }
@@ -49,24 +51,29 @@ export function buildClaudeInvocation(
 ): InvocationSpec {
   const { promptPath, mcpConfigPath, model, maxTurns } = options;
 
+  const args = [
+    "--print",
+    "--output-format",
+    "json",
+    "--model",
+    model,
+    "--max-turns",
+    String(maxTurns),
+    "--thinking",
+    "enabled",
+    "--append-system-prompt-file",
+    promptPath,
+  ];
+
+  if (mcpConfigPath) {
+    args.push("--mcp-config", mcpConfigPath);
+  }
+
+  args.push("--dangerously-skip-permissions");
+
   return {
     command: "claude",
-    args: [
-      "--print",
-      "--output-format",
-      "json",
-      "--model",
-      model,
-      "--max-turns",
-      String(maxTurns),
-      "--thinking",
-      "enabled",
-      "--append-system-prompt-file",
-      promptPath,
-      "--mcp-config",
-      mcpConfigPath,
-      "--dangerously-skip-permissions",
-    ],
+    args,
     env: {
       ...process.env,
       CLAUDECODE: "",
@@ -74,7 +81,7 @@ export function buildClaudeInvocation(
         ? { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY }
         : {}),
     },
-    cleanupPaths: [mcpConfigPath],
+    cleanupPaths: mcpConfigPath ? [mcpConfigPath] : [],
     resolvedModel: model,
   };
 }
@@ -174,7 +181,9 @@ async function buildInvocationSpec(
   options: RunAgentOptions,
 ): Promise<InvocationSpec> {
   const resolvedModel = resolveProviderModel(options.provider);
-  const mcpConfigPath = await createClaudeMcpConfig(options.githubToken);
+  const mcpConfigPath = options.skipMcpGithub
+    ? undefined
+    : await createClaudeMcpConfig(options.githubToken);
   return buildClaudeInvocation({
     promptPath: options.promptPath,
     mcpConfigPath,

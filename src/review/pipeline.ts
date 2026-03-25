@@ -3,23 +3,16 @@ import { Octokit } from "@octokit/rest";
 import { config, resolveProviderModel } from "../config.js";
 import { logger } from "../logger.js";
 import { clonePR, pruneCheckouts } from "../checkout/repo-manager.js";
-import { setLabel } from "../github/labeler.js";
-import { postReview } from "../github/review-poster.js";
 import { buildDiffableLines } from "../github/diff-lines.js";
 import { validateComments } from "../github/comment-validator.js";
-import {
-  addResolvedReactions,
-  addResolvedReactionsToGeneralComment,
-  fetchResolvedThreadIds,
-  fetchUnresolvedThreadCount,
-  postGeneralComment,
-} from "../github/comments.js";
 import { makeFooter } from "../shared/footer.js";
 import { buildPromptFile } from "../prompts/prompt-builder.js";
 import { runBuildAndTests } from "./build-runner.js";
 import { runAgent, type AgentRunner } from "./agent-runner.js";
 import { detectPlatform } from "./platform-detector.js";
 import { parseArchitectureResult, parseDetailedResult } from "./result-parser.js";
+import type { StateBackend } from "../state/backend.js";
+import { GitHubStateBackend } from "../state/github-backend.js";
 import type {
   PRInfo,
   MergedReviewResult,
@@ -73,30 +66,44 @@ function mergeResults(
   };
 }
 
-export async function runReviewPipeline(
-  octokit: Octokit,
+export interface ReviewPipelineOptions {
+  /** Pre-existing checkout path — skip clonePR when provided. */
+  checkoutPath?: string;
+  /** When true, do not configure the GitHub MCP server for the agent. */
+  skipMcpGithub?: boolean;
+}
+
+/**
+ * Backend-agnostic review pipeline core.
+ * All state operations go through the StateBackend interface.
+ */
+export async function runReviewPipelineCore(
   pr: PRInfo,
+  backend: StateBackend,
   agentRunner: AgentRunner = runAgent,
+  options: ReviewPipelineOptions = {},
 ): Promise<void> {
   const log = logger.child({
     pr: `${pr.owner}/${pr.repo}#${pr.number}`,
   });
 
-  let checkoutPath: string | undefined;
+  let checkoutPath: string | undefined = options.checkoutPath;
   let reviewId: string | undefined;
 
   try {
-    // 1. Clone PR branch
-    log.info("Cloning PR branch");
-    checkoutPath = await clonePR({
-      owner: pr.owner,
-      repo: pr.repo,
-      branch: pr.branch,
-      prNumber: pr.number,
-      token: config.GITHUB_TOKEN,
-      workDir: config.WORK_DIR,
-    });
-    log.info({ checkoutPath }, "Cloned successfully");
+    // 1. Clone PR branch (skip if checkoutPath provided)
+    if (!checkoutPath) {
+      log.info("Cloning PR branch");
+      checkoutPath = await clonePR({
+        owner: pr.owner,
+        repo: pr.repo,
+        branch: pr.branch,
+        prNumber: pr.number,
+        token: config.GITHUB_TOKEN,
+        workDir: config.WORK_DIR,
+      });
+      log.info({ checkoutPath }, "Cloned successfully");
+    }
 
     // 2. Run build + tests
     log.info("Running build and tests");
@@ -104,39 +111,26 @@ export async function runReviewPipeline(
 
     if (!buildResult.success) {
       log.warn("Build/tests failed, posting failure comment");
-      await postGeneralComment(
-        octokit,
-        pr.owner,
-        pr.repo,
-        pr.number,
+      await backend.postGeneralComment(
+        pr,
         `## Build/Test Failure\n\n\`\`\`\n${buildResult.output}\n\`\`\`` + makeFooter(randomUUID(), undefined, "reviewer"),
       );
-      await setLabel(octokit, pr.owner, pr.repo, pr.number, "bot-changes-needed");
+      await backend.setLabel(pr, "bot-changes-needed");
       return;
     }
     log.info("Build and tests passed");
 
     // 3. Detect platform
-    const platform = detectPlatform([pr.branch]); // Will be overridden by diff files
-    // Get changed files from the PR for better platform detection
-    const { data: files } = await octokit.rest.pulls.listFiles({
-      owner: pr.owner,
-      repo: pr.repo,
-      pull_number: pr.number,
-      per_page: 100,
-    });
+    const files = await backend.listChangedFiles(pr);
     const detectedPlatform = detectPlatform(files.map((f) => f.filename));
 
     if (!detectedPlatform) {
       log.warn("Could not detect platform from changed files");
-      await postGeneralComment(
-        octokit,
-        pr.owner,
-        pr.repo,
-        pr.number,
+      await backend.postGeneralComment(
+        pr,
         "Could not detect project platform from changed files. Skipping review." + makeFooter(randomUUID(), undefined, "reviewer"),
       );
-      await setLabel(octokit, pr.owner, pr.repo, pr.number, "bot-changes-needed");
+      await backend.setLabel(pr, "bot-changes-needed");
       return;
     }
     log.info({ platform: detectedPlatform }, "Detected platform");
@@ -158,22 +152,21 @@ export async function runReviewPipeline(
     });
 
     // Pre-fetch resolved thread IDs
-    const { data: botUser } = await octokit.rest.users.getAuthenticated();
-    const resolvedThreadIds = await fetchResolvedThreadIds(
-      octokit, pr.owner, pr.repo, pr.number, botUser.login,
-    );
+    const resolvedThreadIds = await backend.fetchResolvedThreadIds(pr);
 
     const resolvedLine = resolvedThreadIds.size > 0
       ? `Already-resolved thread IDs (skip these): ${[...resolvedThreadIds].join(", ")}`
       : `No threads are currently marked as resolved.`;
+
+    const threadContext = await backend.formatThreadStateForAgent(pr);
 
     const userMessage = [
       `Review PR #${pr.number} in ${pr.owner}/${pr.repo}.`,
       `Title: ${pr.title}`,
       `Branch: ${pr.branch}`,
       resolvedLine,
-      `Use the GitHub MCP tools to read PR comments and threads.`,
-      `Read the diff with: git diff origin/main...HEAD`,
+      threadContext,
+      `Read the diff with: git diff origin/${pr.baseBranch}...HEAD`,
     ].join("\n");
 
     // Generate a single review ID for this pipeline run
@@ -192,6 +185,7 @@ export async function runReviewPipeline(
       timeoutMs: config.REVIEW_TIMEOUT_MS,
       reviewId,
       pass: "architecture",
+      skipMcpGithub: options.skipMcpGithub,
     });
     const archResult = parseArchitectureResult(archRaw);
     log.info(
@@ -229,6 +223,7 @@ export async function runReviewPipeline(
         timeoutMs: config.REVIEW_TIMEOUT_MS,
         reviewId,
         pass: "detailed",
+        skipMcpGithub: options.skipMcpGithub,
       });
       const detailResult = parseDetailedResult(detailRaw);
       log.info(
@@ -247,37 +242,10 @@ export async function runReviewPipeline(
     // Add resolved reactions on resolved threads
     for (const tr of merged.thread_responses) {
       if (tr.resolved) {
-        const commentId = Number(tr.thread_id);
-        if (Number.isNaN(commentId)) {
-          log.debug({ threadId: tr.thread_id }, "Skipping reaction — thread_id is not a numeric comment ID");
-          continue;
-        }
         try {
-          await addResolvedReactions(
-            octokit,
-            pr.owner,
-            pr.repo,
-            commentId,
-            "review_comment",
-          );
-        } catch (err: any) {
-          if (err?.status === 404) {
-            // Not an inline review comment — fall back to general comment
-            log.info({ threadId: tr.thread_id }, "Inline reaction 404, falling back to general comment");
-            try {
-              await addResolvedReactionsToGeneralComment(
-                octokit,
-                pr.owner,
-                pr.repo,
-                pr.number,
-                tr.thread_id,
-              );
-            } catch (fallbackErr) {
-              log.warn({ threadId: tr.thread_id, err: fallbackErr }, "Failed to add resolved reactions to general comment");
-            }
-          } else {
-            log.warn({ threadId: tr.thread_id, err }, "Failed to add resolved reactions");
-          }
+          await backend.addResolvedReactions(pr, tr.thread_id);
+        } catch (err) {
+          log.warn({ threadId: tr.thread_id, err }, "Failed to add resolved reactions");
         }
       }
     }
@@ -285,20 +253,9 @@ export async function runReviewPipeline(
     // Post feedback on unresolved threads
     for (const tr of merged.thread_responses) {
       if (!tr.resolved && tr.response) {
-        const commentId = Number(tr.thread_id);
-        if (Number.isNaN(commentId)) {
-          log.debug({ threadId: tr.thread_id }, "Skipping reply — thread_id is not a numeric comment ID");
-          continue;
-        }
         const footer = makeFooter(randomUUID(), reviewId, "reviewer");
         try {
-          await octokit.rest.pulls.createReplyForReviewComment({
-            owner: pr.owner,
-            repo: pr.repo,
-            pull_number: pr.number,
-            comment_id: commentId,
-            body: tr.response + footer,
-          });
+          await backend.replyToThread(pr, tr.thread_id, tr.response + footer);
         } catch (err) {
           log.warn({ threadId: tr.thread_id, err }, "Failed to post thread response");
         }
@@ -319,11 +276,8 @@ export async function runReviewPipeline(
         ...c,
         body: c.body + makeFooter(randomUUID(), reviewId, "reviewer"),
       }));
-      await postReview(
-        octokit,
-        pr.owner,
-        pr.repo,
-        pr.number,
+      await backend.postReview(
+        pr,
         commentsWithFooter,
         merged.summary + makeFooter(randomUUID(), reviewId, "reviewer"),
         "REQUEST_CHANGES",
@@ -332,11 +286,8 @@ export async function runReviewPipeline(
 
     // Post architecture update request if needed
     if (merged.architecture_update_needed.needed) {
-      await postGeneralComment(
-        octokit,
-        pr.owner,
-        pr.repo,
-        pr.number,
+      await backend.postGeneralComment(
+        pr,
         `## ARCHITECTURE.md Update Needed\n\n${merged.architecture_update_needed.reason ?? "This PR changes the project architecture. Please update ARCHITECTURE.md."}` + makeFooter(randomUUID(), reviewId, "reviewer"),
       );
     }
@@ -347,9 +298,7 @@ export async function runReviewPipeline(
 
     // Safety check: verify the agent didn't miss unresolved threads
     if (!hasUnresolved && !hasNewComments) {
-      const unresolvedOnPR = await fetchUnresolvedThreadCount(
-        octokit, pr.owner, pr.repo, pr.number, botUser.login,
-      );
+      const unresolvedOnPR = await backend.fetchUnresolvedThreadCount(pr);
       if (unresolvedOnPR > 0) {
         log.warn(
           { unresolvedOnPR },
@@ -361,36 +310,45 @@ export async function runReviewPipeline(
 
     if (hasUnresolved || hasNewComments) {
       log.info("Review has unresolved items, requesting changes");
-      await setLabel(octokit, pr.owner, pr.repo, pr.number, "bot-changes-needed");
+      await backend.setLabel(pr, "bot-changes-needed");
     } else {
       log.info("Review passed, marking for human review");
       if (merged.comments.length === 0) {
-        await postGeneralComment(
-          octokit,
-          pr.owner,
-          pr.repo,
-          pr.number,
+        await backend.postGeneralComment(
+          pr,
           `LGTM! All review comments have been addressed.` + makeFooter(randomUUID(), reviewId, "reviewer"),
         );
       }
-      await setLabel(octokit, pr.owner, pr.repo, pr.number, "human-review-needed");
+      await backend.setLabel(pr, "human-review-needed");
     }
 
-    // 10. Prune old checkouts
-    await pruneCheckouts(config.WORK_DIR, 30);
+    // 10. Prune old checkouts (only when we cloned)
+    if (!options.checkoutPath) {
+      await pruneCheckouts(config.WORK_DIR, 30);
+    }
   } catch (err) {
     log.error({ err }, "Review pipeline failed");
     try {
-      await postGeneralComment(
-        octokit,
-        pr.owner,
-        pr.repo,
-        pr.number,
+      await backend.postGeneralComment(
+        pr,
         `## Ironsha Error\n\nThe review pipeline encountered an error. Please check the bot logs.\n\n\`\`\`\n${String(err)}\n\`\`\`` + makeFooter(randomUUID(), reviewId, "reviewer"),
       );
-      await setLabel(octokit, pr.owner, pr.repo, pr.number, "bot-changes-needed");
+      await backend.setLabel(pr, "bot-changes-needed");
     } catch (postErr) {
       log.error({ postErr }, "Failed to post error comment");
     }
   }
+}
+
+/**
+ * Existing signature preserved for backward compatibility.
+ * Creates a GitHubStateBackend and delegates to the core.
+ */
+export async function runReviewPipeline(
+  octokit: Octokit,
+  pr: PRInfo,
+  agentRunner: AgentRunner = runAgent,
+): Promise<void> {
+  const backend = new GitHubStateBackend(octokit);
+  await runReviewPipelineCore(pr, backend, agentRunner);
 }
