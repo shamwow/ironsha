@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # --- Commands ---
 CLAUDE_CMD_DIR="${HOME}/.claude/commands"
 mkdir -p "$CLAUDE_CMD_DIR"
-for cmd in learn save load ironsha-local; do
+for cmd in learn save load ironsha-pr; do
   ln -sf "$SCRIPT_DIR/commands/$cmd.md" "$CLAUDE_CMD_DIR/$cmd.md"
   echo "Installed /$cmd → $CLAUDE_CMD_DIR/$cmd.md (symlink)"
 done
@@ -78,5 +78,5 @@ fi
 
 echo ""
 echo "Done. Available:"
-echo "  Commands: /learn, /save, /load, /ironsha-local"
+echo "  Commands: /learn, /save, /load, /ironsha-pr"
 echo "  Lessons:  qmd query (searches .lessons/)"
