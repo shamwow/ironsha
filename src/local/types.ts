@@ -33,7 +33,7 @@ export interface LocalReviewComment {
 export interface LocalReview {
   id: string;
   body: string;
-  event: "COMMENT" | "REQUEST_CHANGES";
+  event: "COMMENT" | "REQUEST_CHANGES" | "APPROVE";
   author: string;
   comments: LocalReviewComment[];
   createdAt: string;

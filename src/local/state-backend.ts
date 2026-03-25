@@ -86,7 +86,7 @@ export class LocalStateBackend implements StateBackend {
     pr: PRInfo,
     comments: ReviewComment[],
     summary: string,
-    event: "COMMENT" | "REQUEST_CHANGES",
+    event: "COMMENT" | "REQUEST_CHANGES" | "APPROVE",
   ): Promise<void> {
     const now = new Date().toISOString();
     const inlineComments: LocalReviewComment[] = comments
