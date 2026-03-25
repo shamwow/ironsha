@@ -291,45 +291,62 @@ async function publishToGitHub(
       );
     }
 
-    // Post thread replies as the developer (writer role), not the bot
+  }
+
+  // 4. Fetch all GitHub PR review comments for matching local → GitHub IDs.
+  // Used for both inline replies and resolved reactions.
+  let ghComments: Array<{ id: number; path: string; line: number | null; body: string }> = [];
+  try {
+    const commentsJson = execSync(
+      `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/comments --paginate`,
+      { cwd: checkoutPath, encoding: "utf-8", ...devEnv },
+    );
+    // --paginate concatenates JSON arrays: [...][...] — merge into one array
+    const raw = commentsJson.trim();
+    ghComments = JSON.parse(raw.replace(/\]\s*\[/g, ","));
+  } catch {
+    console.error("  Could not fetch PR comments for thread matching.");
+  }
+
+  // 5. Post inline thread replies as the developer (writer role)
+  for (const review of state.reviews) {
     for (const comment of review.comments) {
       for (const reply of comment.replies) {
         console.log(`  Posting reply to ${comment.id.slice(0, 8)}...`);
-        const replyBody = `> Re: ${comment.path}:${comment.line}\n\n${reply.body}` +
-          makeFooter(comment.id, undefined, "writer");
-        const fallbackPayload = JSON.stringify({ body: replyBody });
+        const replyBody = reply.body + makeFooter(comment.id, undefined, "writer");
+
+        // Find the GitHub comment ID via thread:: tag to post an inline reply
+        const match = ghComments.find(
+          (gc) => gc.body.includes(`thread::${comment.id}`),
+        );
+        if (match) {
+          try {
+            execSync(
+              `gh api repos/${pr.owner}/${pr.repo}/pulls/comments/${match.id}/replies --input -`,
+              { cwd: checkoutPath, input: JSON.stringify({ body: replyBody }), stdio: ["pipe", "pipe", "pipe"], ...devEnv },
+            );
+            continue;
+          } catch { /* fall through to issue comment */ }
+        }
+
+        // Fallback: post as top-level issue comment with context
+        const fallbackBody = `> Re: ${comment.path}:${comment.line}\n\n${replyBody}`;
         execSync(
           `gh api repos/${pr.owner}/${pr.repo}/issues/${prNumber}/comments --input -`,
-          { cwd: checkoutPath, input: fallbackPayload, stdio: ["pipe", "pipe", "pipe"], ...devEnv },
+          { cwd: checkoutPath, input: JSON.stringify({ body: fallbackBody }), stdio: ["pipe", "pipe", "pipe"], ...devEnv },
         );
       }
     }
   }
 
-  // 4. Post resolved reactions on PR review comments.
-  // Note: replies above go to issue comments (different API), so their footer
-  // tags won't appear in the PR review comments fetched here — no collision risk.
+  // 6. Post resolved reactions
   const resolvedIds = await backend.fetchResolvedThreadIds(pr);
   if (resolvedIds.size > 0) {
     console.log(`Posting reactions for ${resolvedIds.size} resolved comment(s)...`);
-    let ghComments: Array<{ id: number; path: string; line: number | null; body: string }> = [];
-    try {
-      const commentsJson = execSync(
-        `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/comments --paginate`,
-        { cwd: checkoutPath, encoding: "utf-8", ...botEnv },
-      );
-      // --paginate concatenates JSON arrays: [...][...] — merge into one array
-      const raw = commentsJson.trim();
-      ghComments = JSON.parse(raw.replace(/\]\s*\[/g, ","));
-    } catch {
-      console.error("  Could not fetch PR comments for reaction matching.");
-    }
-
     for (const review of state.reviews) {
       for (const comment of review.comments) {
         if (!resolvedIds.has(comment.id)) continue;
 
-        // Match by thread:: tag embedded in the comment footer
         const match = ghComments.find(
           (gc) => gc.body.includes(`thread::${comment.id}`),
         );
