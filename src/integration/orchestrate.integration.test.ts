@@ -84,10 +84,10 @@ function createMockClaudeScript(): string {
     '  if (prompt.includes("Write a PR description that includes:")) {',
     "    emit([",
     '      "**Summary**",',
-    '      "- Complete the requested task in src/task.txt",',
+    '      "- Complete the requested task in `src/task.txt`",',
     '      "",',
     '      "**Test plan**",',
-    '      "- Run node scripts/verify-task.js",',
+    '      "- Run `node scripts/verify-task.js`",',
     '    ].join("\\n"));',
     "    return;",
     "  }",
@@ -159,10 +159,10 @@ function createMockCodexScript(): string {
     '  } else if (prompt.includes("Write a PR description that includes:")) {',
     "    finalMessage = [",
     '      "**Summary**",',
-    '      "- Complete the requested task in src/task.txt",',
+    '      "- Complete the requested task in `src/task.txt`",',
     '      "",',
     '      "**Test plan**",',
-    '      "- Run node scripts/verify-task.js",',
+    '      "- Run `node scripts/verify-task.js`",',
     '    ].join("\\n");',
     '  } else if (prompt.includes("Perform BOTH architecture and detailed review in a single pass.")) {',
     '    finalMessage = ["```json", "{\\"comments\\":[],\\"summary\\":\\"Mock review approval.\\",\\"event\\":\\"APPROVE\\"}", "```"].join("\\n");',
@@ -428,7 +428,8 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
     assert.equal(ghState.pr.base, "main");
     assert.equal(ghState.pr.title, ghState.pr.headBranch);
     assert.match(ghState.pr.body, /\*\*Summary\*\*/);
-    assert.match(ghState.pr.body, /node scripts\/verify-task\.js/);
+    assert.match(ghState.pr.body, /`src\/task\.txt`/);
+    assert.match(ghState.pr.body, /`node scripts\/verify-task\.js`/);
     assert.deepEqual(ghState.pr.labels, ["human-review-needed"]);
     assert.equal(ghState.pr.reviews.length, 1);
     assert.equal(ghState.pr.reviews[0]?.event, "APPROVE");

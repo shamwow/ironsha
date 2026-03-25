@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { spawn, execSync } from "node:child_process";
+import { spawn, execFileSync, execSync } from "node:child_process";
 import { createWriteStream, readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -40,7 +40,7 @@ interface OrchestrateOptions {
 
 const DEFAULT_LLM: LlmConfig = { provider: "claude", model: "claude-opus-4-6" };
 const VALID_PROVIDERS = ["claude", "codex"] as const;
-const MAX_TURNS = 1000;
+const MAX_TURNS = 100;
 
 const USAGE = `Usage: ironsha build "<task description>" [options]
 
@@ -507,13 +507,18 @@ ${plan}
 // Phase 4: PR Review
 // ---------------------------------------------------------------------------
 
-function runStateCmd(cwd: string, stateArgs: string): string {
+function runStateCmd(
+  cwd: string,
+  args: string[],
+  options?: { stdin?: string },
+): string {
   const ironshaRoot = resolve(import.meta.dirname, "..");
   const cliPath = join(ironshaRoot, "dist", "local", "cli.js");
-  return execSync(`node "${cliPath}" ${stateArgs}`, {
+  return execFileSync(process.execPath, [cliPath, ...args], {
     cwd,
     encoding: "utf-8",
     env: process.env,
+    input: options?.stdin,
     stdio: ["pipe", "pipe", "pipe"],
   }).trim();
 }
@@ -559,8 +564,8 @@ async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<
   await runPrCiPhase(opts.prLlm, cwd, "pr-ci");
 
   log("PR-REVIEW", "Initializing local state...");
-  runStateCmd(cwd, "init");
-  runStateCmd(cwd, "label set bot-review-needed");
+  runStateCmd(cwd, ["init"]);
+  runStateCmd(cwd, ["label", "set", "bot-review-needed"]);
 
   log("PR-REVIEW", "Committing changes...");
   try {
@@ -583,7 +588,7 @@ Output ONLY the description text, no other commentary.`,
     cwd,
     "pr-description",
   );
-  runStateCmd(cwd, `description set --body "${descOutput.replace(/"/g, '\\"')}"`);
+  runStateCmd(cwd, ["description", "set"], { stdin: descOutput });
 
   // --- Detect platform for review guides ---
   const baseBranch = "main";
@@ -620,7 +625,7 @@ Output ONLY the description text, no other commentary.`,
 
     // Step A: Review
     log("PR-REVIEW", "Running review...");
-    const threadState = runStateCmd(cwd, "threads");
+    const threadState = runStateCmd(cwd, ["threads"]);
 
     const reviewPrompt = [
       basePrompt,
@@ -641,7 +646,7 @@ Output ONLY the description text, no other commentary.`,
     if (jsonMatch) {
       const reviewJson = jsonMatch[1].trim();
       try {
-        runStateCmd(cwd, `review post --json '${reviewJson.replace(/'/g, "'\\''")}'`);
+        runStateCmd(cwd, ["review", "post", "--json", reviewJson]);
       } catch (err) {
         log("PR-REVIEW", `Failed to post review: ${err}`);
       }
@@ -650,7 +655,7 @@ Output ONLY the description text, no other commentary.`,
     }
 
     // Check label
-    const label = runStateCmd(cwd, "label");
+    const label = runStateCmd(cwd, ["label"]);
     log("PR-REVIEW", `Label after review: ${label}`);
 
     if (label === "human-review-needed") {
@@ -660,7 +665,7 @@ Output ONLY the description text, no other commentary.`,
 
     // Step B: Fix
     log("PR-REVIEW", "Running fix pass...");
-    const fixThreadState = runStateCmd(cwd, "threads");
+    const fixThreadState = runStateCmd(cwd, ["threads"]);
 
     const fixPrompt = [
       codeFixPrompt,
@@ -680,8 +685,8 @@ Output ONLY the description text, no other commentary.`,
         };
         for (const thread of fixResult.threads_addressed ?? []) {
           try {
-            runStateCmd(cwd, `reply ${thread.thread_id} --body "${thread.explanation.replace(/"/g, '\\"')}"`);
-            runStateCmd(cwd, `resolve ${thread.thread_id}`);
+            runStateCmd(cwd, ["reply", thread.thread_id, "--body", thread.explanation]);
+            runStateCmd(cwd, ["resolve", thread.thread_id]);
           } catch (err) {
             log("PR-REVIEW", `Failed to resolve thread ${thread.thread_id}: ${err}`);
           }
@@ -719,7 +724,7 @@ Output ONLY the description text, no other commentary.`,
   // Publish
   log("PR-REVIEW", "Publishing to GitHub...");
   try {
-    const publishOutput = runStateCmd(cwd, "publish");
+    const publishOutput = runStateCmd(cwd, ["publish"]);
     log("PR-REVIEW", publishOutput);
   } catch (err) {
     log("PR-REVIEW", `Publish failed: ${err}`);

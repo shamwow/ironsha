@@ -158,6 +158,30 @@ async function publishToGitHub(
   pr: PRInfo,
   checkoutPath: string,
 ): Promise<void> {
+  const runGit = (
+    args: string[],
+    options?: { encoding?: BufferEncoding },
+  ): string =>
+    execFileSync("git", args, {
+      cwd: checkoutPath,
+      stdio: "pipe",
+      ...(options?.encoding ? { encoding: options.encoding } : {}),
+    }).toString();
+
+  const runGh = (
+    args: string[],
+    envOptions: { env: NodeJS.ProcessEnv },
+    options?: { input?: string; encoding?: BufferEncoding },
+  ): string =>
+    execFileSync("gh", args, {
+      cwd: checkoutPath,
+      stdio: ["pipe", "pipe", "pipe"],
+      ...envOptions,
+      ...(options?.input ? { input: options.input } : {}),
+      ...(options?.encoding ? { encoding: options.encoding } : {}),
+    }).toString();
+
+  const repoPath = `repos/${pr.owner}/${pr.repo}`;
   const state = backend.getState();
 
   // GITHUB_TOKEN is used for review comments, reactions, and labels (bot account).
@@ -169,9 +193,11 @@ async function publishToGitHub(
       "which may post as the wrong account. Set GITHUB_TOKEN to the bot token.",
     );
   }
-  const botEnv = ghToken
-    ? { env: { ...process.env, GH_TOKEN: ghToken } }
-    : {};
+  const botEnv = {
+    env: ghToken
+      ? { ...process.env, GH_TOKEN: ghToken }
+      : process.env,
+  };
   // Strip token env vars so gh falls back to `gh auth login` for PR operations.
   // dotenv loads GITHUB_TOKEN into process.env, which gh would otherwise pick up.
   const { GITHUB_TOKEN: _gt, GH_TOKEN: _ght, ...cleanProcessEnv } = process.env;
@@ -180,9 +206,9 @@ async function publishToGitHub(
   // 1. Push branch (uses git's own auth — SSH keys or credential helpers, not GH_TOKEN)
   console.log("Pushing branch...");
   try {
-    execSync(`git push -u origin HEAD`, { cwd: checkoutPath, stdio: "pipe" });
+    runGit(["push", "-u", "origin", "HEAD"]);
   } catch {
-    execSync(`git push origin HEAD`, { cwd: checkoutPath, stdio: "pipe" });
+    runGit(["push", "origin", "HEAD"]);
   }
 
   // 2. Create or find existing PR
@@ -190,14 +216,16 @@ async function publishToGitHub(
   let prUrl: string;
   let prNumber: number;
   try {
-    const existing = execSync(
-      `gh pr view --json number,url --jq '.number'`,
-      { cwd: checkoutPath, encoding: "utf-8", ...devEnv },
+    const existing = runGh(
+      ["pr", "view", "--json", "number,url", "--jq", ".number"],
+      devEnv,
+      { encoding: "utf-8" },
     ).trim();
     prNumber = parseInt(existing, 10);
-    prUrl = execSync(
-      `gh pr view --json url --jq '.url'`,
-      { cwd: checkoutPath, encoding: "utf-8", ...devEnv },
+    prUrl = runGh(
+      ["pr", "view", "--json", "url", "--jq", ".url"],
+      devEnv,
+      { encoding: "utf-8" },
     ).trim();
     console.log(`Found existing PR #${prNumber}: ${prUrl}`);
 
@@ -212,10 +240,11 @@ async function publishToGitHub(
     // No existing PR — create one
     const title = state.pr.title || `${pr.branch}`;
     const body = state.description || "";
-    const result = execFileSync(
-      "gh", ["pr", "create", "--title", title, "--body", body, "--base", pr.baseBranch],
-      { cwd: checkoutPath, encoding: "utf-8", ...devEnv },
-    ).toString().trim();
+    const result = runGh(
+      ["pr", "create", "--title", title, "--body", body, "--base", pr.baseBranch],
+      devEnv,
+      { encoding: "utf-8" },
+    ).trim();
     prUrl = result;
     // Extract PR number from URL
     const numMatch = prUrl.match(/\/pull\/(\d+)/);
@@ -226,9 +255,10 @@ async function publishToGitHub(
   // 3. Fetch PR diff for comment validation
   let diffableLines = new Map<string, Set<number>>();
   try {
-    const filesJson = execSync(
-      `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/files --paginate`,
-      { cwd: checkoutPath, encoding: "utf-8", ...devEnv },
+    const filesJson = runGh(
+      ["api", `${repoPath}/pulls/${prNumber}/files`, "--paginate"],
+      devEnv,
+      { encoding: "utf-8" },
     );
     const raw = filesJson.trim();
     const files: Array<{ filename: string; patch?: string }> = JSON.parse(
@@ -267,9 +297,10 @@ async function publishToGitHub(
         comments,
       });
       try {
-        execSync(
-          `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/reviews --input -`,
-          { cwd: checkoutPath, input: payload, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
+        runGh(
+          ["api", `${repoPath}/pulls/${prNumber}/reviews`, "--input", "-"],
+          botEnv,
+          { input: payload },
         );
       } catch {
         // If batch fails, post summary + comments individually
@@ -281,9 +312,10 @@ async function publishToGitHub(
             comments: [],
           });
           try {
-            execSync(
-              `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/reviews --input -`,
-              { cwd: checkoutPath, input: summaryPayload, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
+            runGh(
+              ["api", `${repoPath}/pulls/${prNumber}/reviews`, "--input", "-"],
+              botEnv,
+              { input: summaryPayload },
             );
           } catch { /* skip */ }
         }
@@ -294,18 +326,20 @@ async function publishToGitHub(
               event: "COMMENT",
               comments: [c],
             });
-            execSync(
-              `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/reviews --input -`,
-              { cwd: checkoutPath, input: singlePayload, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
+            runGh(
+              ["api", `${repoPath}/pulls/${prNumber}/reviews`, "--input", "-"],
+              botEnv,
+              { input: singlePayload },
             );
           } catch {
             // Fall back to issue comment
             const fallbackPayload = JSON.stringify({
               body: `**${c.path}:${c.line}**\n\n${c.body}`,
             });
-            execSync(
-              `gh api repos/${pr.owner}/${pr.repo}/issues/${prNumber}/comments --input -`,
-              { cwd: checkoutPath, input: fallbackPayload, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
+            runGh(
+              ["api", `${repoPath}/issues/${prNumber}/comments`, "--input", "-"],
+              botEnv,
+              { input: fallbackPayload },
             );
           }
         }
@@ -319,9 +353,10 @@ async function publishToGitHub(
           comments: [],
         });
         try {
-          execSync(
-            `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/reviews --input -`,
-            { cwd: checkoutPath, input: gcPayload, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
+          runGh(
+            ["api", `${repoPath}/pulls/${prNumber}/reviews`, "--input", "-"],
+            botEnv,
+            { input: gcPayload },
           );
         } catch { /* skip */ }
       }
@@ -333,9 +368,10 @@ async function publishToGitHub(
         comments: [],
       });
       try {
-        execSync(
-          `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/reviews --input -`,
-          { cwd: checkoutPath, input: payload, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
+        runGh(
+          ["api", `${repoPath}/pulls/${prNumber}/reviews`, "--input", "-"],
+          botEnv,
+          { input: payload },
         );
       } catch {
         // APPROVE with body can fail if the review was already submitted; try as COMMENT
@@ -345,9 +381,10 @@ async function publishToGitHub(
           comments: [],
         });
         try {
-          execSync(
-            `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/reviews --input -`,
-            { cwd: checkoutPath, input: fallbackPayload, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
+          runGh(
+            ["api", `${repoPath}/pulls/${prNumber}/reviews`, "--input", "-"],
+            botEnv,
+            { input: fallbackPayload },
           );
         } catch {
           console.error(`  Failed to post review ${review.id.slice(0, 8)}, skipping.`);
@@ -361,9 +398,10 @@ async function publishToGitHub(
   // Used for both inline replies and resolved reactions.
   let ghComments: Array<{ id: number; path: string; line: number | null; body: string }> = [];
   try {
-    const commentsJson = execSync(
-      `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/comments --paginate`,
-      { cwd: checkoutPath, encoding: "utf-8", ...devEnv },
+    const commentsJson = runGh(
+      ["api", `${repoPath}/pulls/${prNumber}/comments`, "--paginate"],
+      devEnv,
+      { encoding: "utf-8" },
     );
     // --paginate concatenates JSON arrays: [...][...] — merge into one array
     const raw = commentsJson.trim();
@@ -385,9 +423,10 @@ async function publishToGitHub(
         );
         if (match) {
           try {
-            execSync(
-              `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/comments/${match.id}/replies --input -`,
-              { cwd: checkoutPath, input: JSON.stringify({ body: replyBody }), stdio: ["pipe", "pipe", "pipe"], ...devEnv },
+            runGh(
+              ["api", `${repoPath}/pulls/${prNumber}/comments/${match.id}/replies`, "--input", "-"],
+              devEnv,
+              { input: JSON.stringify({ body: replyBody }) },
             );
             continue;
           } catch { /* fall through to issue comment */ }
@@ -395,9 +434,10 @@ async function publishToGitHub(
 
         // Fallback: post as top-level issue comment with context
         const fallbackBody = `> Re: ${comment.path}:${comment.line}\n\n${replyBody}`;
-        execSync(
-          `gh api repos/${pr.owner}/${pr.repo}/issues/${prNumber}/comments --input -`,
-          { cwd: checkoutPath, input: JSON.stringify({ body: fallbackBody }), stdio: ["pipe", "pipe", "pipe"], ...devEnv },
+        runGh(
+          ["api", `${repoPath}/issues/${prNumber}/comments`, "--input", "-"],
+          devEnv,
+          { input: JSON.stringify({ body: fallbackBody }) },
         );
       }
     }
@@ -421,14 +461,10 @@ async function publishToGitHub(
 
         for (const reaction of ["rocket", "+1"] as const) {
           try {
-            execSync(
-              `gh api repos/${pr.owner}/${pr.repo}/pulls/comments/${match.id}/reactions --input -`,
-              {
-                cwd: checkoutPath,
-                input: JSON.stringify({ content: reaction }),
-                stdio: ["pipe", "pipe", "pipe"],
-                ...botEnv,
-              },
+            runGh(
+              ["api", `${repoPath}/pulls/comments/${match.id}/reactions`, "--input", "-"],
+              botEnv,
+              { input: JSON.stringify({ content: reaction }) },
             );
           } catch { /* reaction may already exist */ }
         }
@@ -445,20 +481,16 @@ async function publishToGitHub(
   ];
   for (const label of botLabels) {
     try {
-      execSync(
-        `gh api repos/${pr.owner}/${pr.repo}/issues/${prNumber}/labels/${label} -X DELETE`,
-        { cwd: checkoutPath, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
+      runGh(
+        ["api", `${repoPath}/issues/${prNumber}/labels/${label}`, "-X", "DELETE"],
+        botEnv,
       );
     } catch { /* label not present */ }
   }
-  execSync(
-    `gh api repos/${pr.owner}/${pr.repo}/issues/${prNumber}/labels --input -`,
-    {
-      cwd: checkoutPath,
-      input: JSON.stringify({ labels: [state.label] }),
-      stdio: ["pipe", "pipe", "pipe"],
-      ...botEnv,
-    },
+  runGh(
+    ["api", `${repoPath}/issues/${prNumber}/labels`, "--input", "-"],
+    botEnv,
+    { input: JSON.stringify({ labels: [state.label] }) },
   );
 
   console.log(`\nPublished: ${prUrl}`);
