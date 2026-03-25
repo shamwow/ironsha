@@ -15,6 +15,26 @@ const VALID_LABELS: readonly string[] = [
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Resolve a (possibly prefix-based) comment ID to the full UUID by scanning
+ * all reviews in the given backend state.  Returns `undefined` when no match
+ * is found.
+ */
+function resolveCommentId(
+  backend: LocalStateBackend,
+  partialId: string,
+): string | undefined {
+  const state = backend.getState();
+  for (const review of state.reviews) {
+    for (const comment of review.comments) {
+      if (comment.id === partialId || comment.id.startsWith(partialId)) {
+        return comment.id;
+      }
+    }
+  }
+  return undefined;
+}
+
 const USAGE = `Usage: ironsha-state <command> [args]
 
 Commands:
@@ -131,7 +151,7 @@ async function publishToGitHub(
   const state = backend.getState();
 
   // Ensure gh CLI uses the correct token
-  const ghToken = config.GITHUB_TOKEN || process.env.GITHUB_TOKEN;
+  const ghToken = config.GITHUB_TOKEN;
   if (!ghToken) {
     console.warn(
       "WARNING: GITHUB_TOKEN is not set. gh commands will use default auth, " +
@@ -145,9 +165,9 @@ async function publishToGitHub(
   // 1. Push branch
   console.log("Pushing branch...");
   try {
-    execSync(`git push -u origin HEAD`, { cwd: checkoutPath, stdio: "pipe" });
+    execSync(`git push -u origin HEAD`, { cwd: checkoutPath, stdio: "pipe", ...ghEnv });
   } catch {
-    execSync(`git push origin HEAD`, { cwd: checkoutPath, stdio: "pipe" });
+    execSync(`git push origin HEAD`, { cwd: checkoutPath, stdio: "pipe", ...ghEnv });
   }
 
   // 2. Create or find existing PR
@@ -283,10 +303,10 @@ async function publishToGitHub(
   const resolvedIds = await backend.fetchResolvedThreadIds(pr);
   if (resolvedIds.size > 0) {
     console.log(`Posting reactions for ${resolvedIds.size} resolved comment(s)...`);
-    let ghComments: Array<{ id: number; path: string; line: number; body: string }> = [];
+    let ghComments: Array<{ id: number; path: string; line: number | null; body: string }> = [];
     try {
       const commentsJson = execSync(
-        `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/comments --paginate`,
+        `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/comments --paginate --jq '[.[] | {id, path, line, body}]'`,
         { cwd: checkoutPath, encoding: "utf-8", ...ghEnv },
       );
       ghComments = JSON.parse(commentsJson);
@@ -298,12 +318,9 @@ async function publishToGitHub(
       for (const comment of review.comments) {
         if (!resolvedIds.has(comment.id)) continue;
 
-        // Match by path + line + body prefix
+        // Match by thread:: tag embedded in the comment footer
         const match = ghComments.find(
-          (gc) =>
-            gc.path === comment.path &&
-            gc.line === comment.line &&
-            gc.body.includes(comment.body.slice(0, 80)),
+          (gc) => gc.body.includes(`thread::${comment.id}`),
         );
         if (!match) {
           console.error(`  Could not match comment ${comment.id.slice(0, 8)} to GitHub.`);
@@ -513,17 +530,7 @@ async function main(): Promise<void> {
         console.error("Usage: ironsha-state resolve <comment-id>");
         process.exit(1);
       }
-      const state = backend.getState();
-      let fullId: string | undefined;
-      for (const review of state.reviews) {
-        for (const comment of review.comments) {
-          if (comment.id === commentId || comment.id.startsWith(commentId)) {
-            fullId = comment.id;
-            break;
-          }
-        }
-        if (fullId) break;
-      }
+      const fullId = resolveCommentId(backend, commentId);
       if (!fullId) {
         console.error(`Comment not found: ${commentId}`);
         process.exit(1);
@@ -544,17 +551,7 @@ async function main(): Promise<void> {
         console.error("Usage: ironsha-state reply <comment-id> --body <text>");
         process.exit(1);
       }
-      const state = backend.getState();
-      let fullId: string | undefined;
-      for (const review of state.reviews) {
-        for (const comment of review.comments) {
-          if (comment.id === commentId || comment.id.startsWith(commentId)) {
-            fullId = comment.id;
-            break;
-          }
-        }
-        if (fullId) break;
-      }
+      const fullId = resolveCommentId(backend, commentId);
       if (!fullId) {
         console.error(`Comment not found: ${commentId}`);
         process.exit(1);
