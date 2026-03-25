@@ -484,7 +484,11 @@ ${instructions.join("\n")}`;
 
 export function buildPrDescriptionPrompt(platform: string | null): string {
   const lines = [
-    "Look at the git diff for this branch against the base branch. Write a PR description that includes:",
+    "Look at the git diff for this branch against the base branch.",
+    "Output a single JSON object with this shape:",
+    '{ "title": "short PR title", "body": "full PR description markdown" }',
+    'The `title` must be a concise human-readable PR title, not the branch or worktree name.',
+    'The `body` markdown must include:',
     "- **Summary**: What changed and why (1-3 bullet points)",
     "- **Test plan**: Explicit steps that verify the changes work correctly",
   ];
@@ -499,8 +503,34 @@ export function buildPrDescriptionPrompt(platform: string | null): string {
     );
   }
 
-  lines.push("", "Output ONLY the description text, no other commentary.");
+  lines.push("", "Output ONLY the JSON object, no other commentary.");
   return lines.join("\n");
+}
+
+type PrDraft = {
+  title: string;
+  body: string;
+};
+
+function parsePrDraft(output: string): PrDraft {
+  const json = extractJsonBlock(output);
+  if (json) {
+    try {
+      const parsed = JSON.parse(json) as Partial<PrDraft>;
+      const title = parsed.title?.trim();
+      const body = parsed.body?.trim();
+      if (title && body) {
+        return { title, body };
+      }
+    } catch {
+      // Fall through to legacy behavior below.
+    }
+  }
+
+  return {
+    title: "",
+    body: output.trim(),
+  };
 }
 
 type LocalStateSnapshot = {
@@ -826,7 +856,8 @@ async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<
     cwd,
     "pr-description",
   );
-  runStateCmd(cwd, ["description", "set"], { stdin: descOutput });
+  const prDraft = parsePrDraft(descOutput);
+  runStateCmd(cwd, ["description", "set", "--title", prDraft.title], { stdin: prDraft.body });
 
   // --- Detect platform for review guides ---
 

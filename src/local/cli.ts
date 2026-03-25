@@ -294,10 +294,11 @@ async function publishToGitHub(
     console.log(`Found existing PR #${prNumber}: ${prUrl}`);
 
     // Update description if set
-    if (state.description) {
-      const githubDescription = rewriteMediaReferencesForGithub(state.description, pr);
+    if (state.description || state.pr.title) {
+      const githubDescription = rewriteMediaReferencesForGithub(state.description || "", pr);
+      const title = state.pr.title || pr.branch;
       execFileSync(
-        "gh", ["pr", "edit", String(prNumber), "--body", githubDescription],
+        "gh", ["pr", "edit", String(prNumber), "--title", title, "--body", githubDescription],
         { cwd: checkoutPath, stdio: "pipe", ...devEnv },
       );
     }
@@ -660,6 +661,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     case "description": {
       if (subcommand === "set") {
         const body = flags["body"];
+        const title = flags["title"];
         if (!body) {
           // Read from stdin if no --body flag
           const chunks: Buffer[] = [];
@@ -668,13 +670,19 @@ export async function main(argv: string[] = process.argv): Promise<void> {
           }
           const stdinBody = Buffer.concat(chunks).toString("utf-8").trim();
           if (!stdinBody) {
-            console.error("Usage: ironsha-state description set --body <text>");
+            console.error("Usage: ironsha-state description set [--title <text>] --body <text>");
             console.error("  Or pipe: echo 'description' | ironsha-state description set");
             process.exit(1);
+          }
+          if (title) {
+            await backend.setTitle(title);
           }
           await backend.setDescription(stdinBody);
           console.log("Description set.");
         } else {
+          if (title) {
+            await backend.setTitle(title);
+          }
           await backend.setDescription(body);
           console.log("Description set.");
         }

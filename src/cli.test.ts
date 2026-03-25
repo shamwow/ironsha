@@ -82,6 +82,8 @@ test("buildPrDescriptionPrompt requires a Visual evidence section for React and 
   const reactPrompt = buildPrDescriptionPrompt("react");
   const iosPrompt = buildPrDescriptionPrompt("ios");
 
+  assert.match(reactPrompt, /"title": "short PR title"/);
+  assert.match(reactPrompt, /must be a concise human-readable PR title, not the branch or worktree name/i);
   assert.match(reactPrompt, /\*\*Visual evidence\*\*/);
   assert.match(reactPrompt, /Playwright/);
   assert.match(reactPrompt, /artifact path, whether it is a screenshot or video, the exact screen\/state shown/i);
@@ -94,6 +96,7 @@ test("buildPrDescriptionPrompt requires a Visual evidence section for React and 
 test("buildPrDescriptionPrompt does not require Visual evidence for non-UI platforms", () => {
   const prompt = buildPrDescriptionPrompt("golang");
 
+  assert.match(prompt, /"title": "short PR title"/);
   assert.doesNotMatch(prompt, /Visual evidence/i);
 });
 
