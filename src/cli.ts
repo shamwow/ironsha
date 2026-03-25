@@ -415,6 +415,61 @@ function detectPlatformFromDiff(cwd: string, baseBranch: string): string | null 
   return best;
 }
 
+function uiEvidenceInstructions(platform: string | null): string[] {
+  if (platform !== "react" && platform !== "ios") {
+    return [];
+  }
+
+  return [
+    "- Inspect the changed files and determine whether the diff includes a user-visible UI change",
+    "- If the diff changes UI, capture visual evidence before finishing:",
+    "  - static UI changes: take screenshots that clearly show the updated UI state",
+    "  - interactive UI changes: capture a short video or GIF that shows the behavior",
+    "- Save the artifacts in the repo workspace and include their exact file paths in your final summary",
+    "- If the diff is not user-visible UI, state explicitly in your final summary that visual evidence was not required",
+  ];
+}
+
+export function buildImplementPrompt(plan: string, platform: string | null): string {
+  const instructions = [
+    "- Implement each step of the plan in order",
+    "- Follow existing codebase patterns and conventions",
+    "- Read AGENTS.md, CLAUDE.md, ARCHITECTURE.md if they exist",
+    "- After making changes, run the project's build and test commands to verify",
+    "- Fix any build/test failures before proceeding",
+    "- Do NOT commit changes — just make the code changes and ensure they build",
+    "- Be thorough — implement every step in the plan",
+    ...uiEvidenceInstructions(platform),
+  ];
+
+  return `You are a software engineer implementing a plan. Follow it step by step.
+
+## Implementation Plan
+${plan}
+
+## Instructions
+${instructions.join("\n")}`;
+}
+
+export function buildPrDescriptionPrompt(platform: string | null): string {
+  const lines = [
+    "Look at the git diff for this branch against the base branch. Write a PR description that includes:",
+    "- **Summary**: What changed and why (1-3 bullet points)",
+    "- **Test plan**: Explicit steps that verify the changes work correctly",
+  ];
+
+  if (platform === "react" || platform === "ios") {
+    lines.push(
+      "- Inspect the diff and determine whether it includes a user-visible UI change",
+      "- If it does, include a **Visual evidence** section with screenshot or video/GIF artifact paths and a short note about what each artifact shows",
+      "- If it does not, include **Visual evidence**: Not applicable",
+    );
+  }
+
+  lines.push("", "Output ONLY the description text, no other commentary.");
+  return lines.join("\n");
+}
+
 // ---------------------------------------------------------------------------
 // Phase 1: Plan
 // ---------------------------------------------------------------------------
@@ -489,20 +544,8 @@ Respond with the complete updated Markdown plan. Nothing else.`;
 
 async function runImplementPhase(opts: OrchestrateOptions, plan: string, cwd: string): Promise<void> {
   log("IMPLEMENT", `Starting with ${llmLabel(opts.implementLlm)}...`);
-
-  const prompt = `You are a software engineer implementing a plan. Follow it step by step.
-
-## Implementation Plan
-${plan}
-
-## Instructions
-- Implement each step of the plan in order
-- Follow existing codebase patterns and conventions
-- Read AGENTS.md, CLAUDE.md, ARCHITECTURE.md if they exist
-- After making changes, run the project's build and test commands to verify
-- Fix any build/test failures before proceeding
-- Do NOT commit changes — just make the code changes and ensure they build
-- Be thorough — implement every step in the plan`;
+  const platform = detectPlatformFromDiff(cwd, "main");
+  const prompt = buildImplementPrompt(plan, platform);
 
   await runAgenticMode(opts.implementLlm, prompt, cwd, "implement");
   log("IMPLEMENT", "Complete.");
@@ -581,21 +624,17 @@ async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<
   }
 
   log("PR-REVIEW", "Generating PR description...");
+  const baseBranch = "main";
+  const platform = detectPlatformFromDiff(cwd, baseBranch);
   const descOutput = await runPrintMode(
     opts.prLlm,
-    `Look at the git diff for this branch against the base branch. Write a PR description that includes:
-- **Summary**: What changed and why (1-3 bullet points)
-- **Test plan**: Explicit steps that verify the changes work correctly
-
-Output ONLY the description text, no other commentary.`,
+    buildPrDescriptionPrompt(platform),
     cwd,
     "pr-description",
   );
   runStateCmd(cwd, ["description", "set"], { stdin: descOutput });
 
   // --- Detect platform for review guides ---
-  const baseBranch = "main";
-  const platform = detectPlatformFromDiff(cwd, baseBranch);
 
   // --- Build review prompt ---
   const basePrompt = readPromptFile("base.md")
