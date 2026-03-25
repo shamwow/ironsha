@@ -5,6 +5,8 @@ import { logger } from "../logger.js";
 import { clonePR, pruneCheckouts } from "../checkout/repo-manager.js";
 import { setLabel } from "../github/labeler.js";
 import { postReview } from "../github/review-poster.js";
+import { buildDiffableLines } from "../github/diff-lines.js";
+import { validateComments } from "../github/comment-validator.js";
 import {
   addResolvedReactions,
   addResolvedReactionsToGeneralComment,
@@ -301,6 +303,14 @@ export async function runReviewPipeline(
         }
       }
     }
+
+    // Validate comment lines against the PR diff
+    const diffableLines = buildDiffableLines(files.map((f) => ({ filename: f.filename, patch: f.patch })));
+    const { comments: validatedComments, adjustedCount } = validateComments(merged.comments, diffableLines);
+    if (adjustedCount > 0) {
+      log.info({ adjustedCount }, "Adjusted comments with invalid diff lines");
+    }
+    merged.comments = validatedComments;
 
     // Post new review comments
     if (merged.comments.length > 0) {
