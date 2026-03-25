@@ -346,7 +346,6 @@ async function runAgenticMode(llm: LlmConfig, prompt: string, cwd: string, phase
       lineBuffer = remainder;
       if (text) {
         textContent += text;
-        process.stderr.write(text);
       }
       if (resultText) resultContent += resultText;
     });
@@ -360,7 +359,6 @@ async function runAgenticMode(llm: LlmConfig, prompt: string, cwd: string, phase
         const extracted = extractFromStreamJson(lineBuffer);
         if (extracted.text) {
           textContent += extracted.text;
-          process.stderr.write(extracted.text);
         }
         if (extracted.resultText) resultContent += extracted.resultText;
       }
