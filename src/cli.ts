@@ -420,18 +420,33 @@ function detectPlatformFromDiff(cwd: string, baseBranch: string): string | null 
 }
 
 function uiEvidenceInstructions(platform: string | null): string[] {
-  if (platform !== "react" && platform !== "ios") {
-    return [];
+  if (platform === "react") {
+    return [
+      "- Inspect the changed files and determine whether the diff includes a user-visible UI change",
+      "- If the diff changes UI, use Playwright to open the app, navigate it into the correct product state, and capture visual evidence before finishing",
+      "  - static UI changes: use Playwright to take screenshots that clearly show the updated UI state",
+      "  - interactive UI changes: use Playwright to drive the interaction and capture a short video that shows the behavior working",
+      "- Save the artifacts in the repo workspace and include their exact file paths in your final summary",
+      "- In your final summary, name the Playwright flow used to reach the captured state and describe what each artifact shows",
+      "- If Playwright is unavailable, say that explicitly and do not claim the visual evidence is complete",
+      "- If the diff is not user-visible UI, state explicitly in your final summary that visual evidence was not required",
+    ];
   }
 
-  return [
-    "- Inspect the changed files and determine whether the diff includes a user-visible UI change",
-    "- If the diff changes UI, capture visual evidence before finishing:",
-    "  - static UI changes: take screenshots that clearly show the updated UI state",
-    "  - interactive UI changes: capture a short video or GIF that shows the behavior",
-    "- Save the artifacts in the repo workspace and include their exact file paths in your final summary",
-    "- If the diff is not user-visible UI, state explicitly in your final summary that visual evidence was not required",
-  ];
+  if (platform === "ios") {
+    return [
+      "- Inspect the changed files and determine whether the diff includes a user-visible UI change",
+      "- If the diff changes UI, use XcodeBuildMCP to launch the app in the iOS simulator, navigate it into the correct product state, and capture visual evidence before finishing",
+      "  - static UI changes: use XcodeBuildMCP to take screenshots that clearly show the updated UI state",
+      "  - interactive UI changes: use XcodeBuildMCP to drive the interaction and capture a short video that shows the behavior working",
+      "- Save the artifacts in the repo workspace and include their exact file paths in your final summary",
+      "- In your final summary, name the XcodeBuildMCP/simulator flow used to reach the captured state and describe what each artifact shows",
+      "- If XcodeBuildMCP is unavailable, say that explicitly and do not claim the visual evidence is complete",
+      "- If the diff is not user-visible UI, state explicitly in your final summary that visual evidence was not required",
+    ];
+  }
+
+  return [];
 }
 
 export function buildQaPlanReviewPrompt(task: string, plan: string): string {
@@ -475,9 +490,11 @@ export function buildPrDescriptionPrompt(platform: string | null): string {
   ];
 
   if (platform === "react" || platform === "ios") {
+    const tool = platform === "react" ? "Playwright" : "XcodeBuildMCP";
     lines.push(
       "- Inspect the diff and determine whether it includes a user-visible UI change",
-      "- If it does, include a **Visual evidence** section with screenshot or video/GIF artifact paths and a short note about what each artifact shows",
+      `- If it does, include a **Visual evidence** section where each item states the artifact path, whether it is a screenshot or video, the exact screen/state shown, and that it was captured with ${tool}`,
+      "- For interactive UI changes, require video evidence, not screenshots alone",
       "- If it does not, include **Visual evidence**: Not applicable",
     );
   }
@@ -704,7 +721,7 @@ export function buildQaReviewPrompt(
     description || "(no description)",
     "\n---\n\n## Current Thread State\n",
     threadState || "(no threads yet)",
-    `\n\n## Instructions\nReview the implemented feature from a QA perspective. Read the diff with \`git diff origin/${baseBranch}...HEAD\`. Verify the test plan exercises the feature at the product level. For UI changes, verify the PR description includes the right visual evidence, require video/GIF for interactive behavior, and confirm the screenshot/video artifacts actually show the implemented feature working correctly. Output a single JSON block per the format above.`,
+    `\n\n## Instructions\nReview the implemented feature from a QA perspective. Read the diff with \`git diff origin/${baseBranch}...HEAD\`. Verify the test plan exercises the feature at the product level. For React/web UI changes, require Playwright-driven visual evidence that shows how the app was loaded into the correct state. For iOS UI changes, require XcodeBuildMCP-driven visual evidence that shows how the simulator was loaded into the correct state. For UI changes, verify the PR description includes the right visual evidence, require video/GIF for interactive behavior, and confirm the screenshot/video artifacts actually show the implemented feature working correctly. Output a single JSON block per the format above.`,
   ].join("\n");
 }
 

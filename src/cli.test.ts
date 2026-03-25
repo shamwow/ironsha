@@ -55,10 +55,20 @@ test("formatSubprocessFailure surfaces repeated Claude api retries as usage exha
 test("buildImplementPrompt requires visual evidence handling for React UI diffs", () => {
   const prompt = buildImplementPrompt("# Plan", "react");
 
-  assert.match(prompt, /capture visual evidence/i);
+  assert.match(prompt, /Playwright/i);
+  assert.match(prompt, /open the app, navigate it into the correct product state/i);
   assert.match(prompt, /screenshots/i);
-  assert.match(prompt, /video or GIF/i);
+  assert.match(prompt, /capture a short video/i);
   assert.match(prompt, /include their exact file paths in your final summary/i);
+});
+
+test("buildImplementPrompt requires XcodeBuildMCP for iOS UI diffs", () => {
+  const prompt = buildImplementPrompt("# Plan", "ios");
+
+  assert.match(prompt, /XcodeBuildMCP/i);
+  assert.match(prompt, /launch the app in the iOS simulator/i);
+  assert.match(prompt, /screenshots/i);
+  assert.match(prompt, /capture a short video/i);
 });
 
 test("buildImplementPrompt omits visual evidence instructions for non-UI platforms", () => {
@@ -73,8 +83,12 @@ test("buildPrDescriptionPrompt requires a Visual evidence section for React and 
   const iosPrompt = buildPrDescriptionPrompt("ios");
 
   assert.match(reactPrompt, /\*\*Visual evidence\*\*/);
+  assert.match(reactPrompt, /Playwright/);
+  assert.match(reactPrompt, /artifact path, whether it is a screenshot or video, the exact screen\/state shown/i);
   assert.match(reactPrompt, /Not applicable/);
   assert.match(iosPrompt, /\*\*Visual evidence\*\*/);
+  assert.match(iosPrompt, /XcodeBuildMCP/);
+  assert.match(iosPrompt, /interactive UI changes, require video evidence/i);
 });
 
 test("buildPrDescriptionPrompt does not require Visual evidence for non-UI platforms", () => {
@@ -89,7 +103,8 @@ test("buildQaPlanReviewPrompt requires product-level test setup and verification
   assert.match(prompt, /product-level test plan/i);
   assert.match(prompt, /load the product into the state/i);
   assert.match(prompt, /verify the feature/i);
-  assert.match(prompt, /UI changes/i);
+  assert.match(prompt, /Playwright/i);
+  assert.match(prompt, /XcodeBuildMCP/i);
 });
 
 test("buildQaReviewPrompt requires visual evidence validation for UI changes", () => {
@@ -102,6 +117,8 @@ test("buildQaReviewPrompt requires visual evidence validation for UI changes", (
 
   assert.match(prompt, /Visual evidence/i);
   assert.match(prompt, /video\/GIF/i);
+  assert.match(prompt, /Playwright-driven visual evidence/i);
+  assert.match(prompt, /XcodeBuildMCP-driven visual evidence/i);
   assert.match(prompt, /actually show the implemented feature/i);
   assert.match(prompt, /git diff origin\/main\.\.\.HEAD/);
 });
