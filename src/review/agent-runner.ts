@@ -181,6 +181,9 @@ export async function runAgent(
 
     child.stdout.on("data", (data: Buffer) => {
       collector.handleStdout(data);
+      if (collector.shouldAbortForProviderFailure()) {
+        child.kill("SIGTERM");
+      }
     });
 
     child.stderr.on("data", (data: Buffer) => {

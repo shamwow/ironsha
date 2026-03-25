@@ -231,6 +231,9 @@ async function runPrintMode(llm: LlmConfig, prompt: string, cwd: string, phase: 
     child.stdout.on("data", (data: Buffer) => {
       transcript.stdout.write(data);
       collector.handleStdout(data);
+      if (collector.shouldAbortForProviderFailure()) {
+        child.kill("SIGTERM");
+      }
     });
     child.stderr.on("data", (data: Buffer) => {
       collector.handleStderr(data);
@@ -286,6 +289,9 @@ async function runAgenticMode(llm: LlmConfig, prompt: string, cwd: string, phase
       const streamed = collector.handleStdout(data);
       if (streamed) {
         process.stderr.write(streamed);
+      }
+      if (collector.shouldAbortForProviderFailure()) {
+        child.kill("SIGTERM");
       }
     });
     child.stderr.on("data", (data: Buffer) => {

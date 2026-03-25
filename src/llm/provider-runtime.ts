@@ -211,6 +211,7 @@ export class ProviderOutputCollector {
   private lineBuffer = "";
   private textContent = "";
   private resultContent = "";
+  private claudeRetryCount = 0;
 
   constructor(
     private readonly spec: ProviderInvocationSpec,
@@ -227,6 +228,9 @@ export class ProviderOutputCollector {
       this.lineBuffer = lines.pop() ?? "";
       let streamed = "";
       for (const line of lines) {
+        if (line.includes('"subtype":"api_retry"')) {
+          this.claudeRetryCount++;
+        }
         const extracted = extractFromStreamJson(line);
         if (extracted.text) {
           this.textContent += extracted.text;
@@ -248,6 +252,9 @@ export class ProviderOutputCollector {
 
   async finalize(): Promise<string> {
     if (this.spec.stdoutFormat === "claude-stream-json" && this.lineBuffer) {
+      if (this.lineBuffer.includes('"subtype":"api_retry"')) {
+        this.claudeRetryCount++;
+      }
       const extracted = extractFromStreamJson(this.lineBuffer);
       if (extracted.text) this.textContent += extracted.text;
       if (extracted.resultText) this.resultContent += extracted.resultText;
@@ -266,7 +273,7 @@ export class ProviderOutputCollector {
     }
 
     if (this.spec.stdoutFormat === "claude-stream-json") {
-      return this.textContent || this.resultContent;
+      return this.textContent || this.resultContent || this.stdout;
     }
 
     return this.stdout;
@@ -278,6 +285,13 @@ export class ProviderOutputCollector {
 
   getStderr(): string {
     return this.stderr;
+  }
+
+  shouldAbortForProviderFailure(): boolean {
+    return this.spec.stdoutFormat === "claude-stream-json"
+      && this.claudeRetryCount >= 3
+      && this.textContent.length === 0
+      && this.resultContent.length === 0;
   }
 
   async cleanup(): Promise<void> {

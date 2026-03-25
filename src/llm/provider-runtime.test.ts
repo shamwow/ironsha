@@ -122,3 +122,26 @@ test("ProviderOutputCollector extracts Claude assistant text from stream-json ou
   assert.equal(await collector.finalize(), "hello from claude");
   await collector.cleanup();
 });
+
+test("ProviderOutputCollector requests early abort after repeated Claude api retries", async () => {
+  const invocation = await buildProviderInvocation({
+    provider: "claude",
+    model: "claude-sonnet-4-6",
+    mode: "print",
+    maxTurns: 10,
+  });
+  const collector = new ProviderOutputCollector(invocation, false);
+
+  collector.handleStdout(
+    Buffer.from(
+      [
+        '{"type":"system","subtype":"api_retry","attempt":1}',
+        '{"type":"system","subtype":"api_retry","attempt":2}',
+        '{"type":"system","subtype":"api_retry","attempt":3}',
+      ].join("\n") + "\n",
+    ),
+  );
+
+  assert.equal(collector.shouldAbortForProviderFailure(), true);
+  await collector.cleanup();
+});
