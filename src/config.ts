@@ -1,3 +1,6 @@
+// Must be the first import — loads .env into process.env before readConfig() runs.
+import "dotenv/config";
+
 export type AgentProvider = "claude";
 
 function optionalEnvFrom(

@@ -152,17 +152,22 @@ async function publishToGitHub(
 ): Promise<void> {
   const state = backend.getState();
 
-  // Ensure gh CLI uses the correct token
+  // GITHUB_TOKEN is used for review comments, reactions, and labels (bot account).
+  // PR creation, editing, and viewing use the default gh auth (developer account).
   const ghToken = config.GITHUB_TOKEN;
   if (!ghToken) {
     console.warn(
-      "WARNING: GITHUB_TOKEN is not set. gh commands will use default auth, " +
+      "WARNING: GITHUB_TOKEN is not set. Review comments will use default gh auth, " +
       "which may post as the wrong account. Set GITHUB_TOKEN to the bot token.",
     );
   }
-  const ghEnv = ghToken
+  const botEnv = ghToken
     ? { env: { ...process.env, GH_TOKEN: ghToken } }
     : {};
+  // Strip token env vars so gh falls back to `gh auth login` for PR operations.
+  // dotenv loads GITHUB_TOKEN into process.env, which gh would otherwise pick up.
+  const { GITHUB_TOKEN: _gt, GH_TOKEN: _ght, ...cleanProcessEnv } = process.env;
+  const devEnv = { env: cleanProcessEnv };
 
   // 1. Push branch (uses git's own auth — SSH keys or credential helpers, not GH_TOKEN)
   console.log("Pushing branch...");
@@ -179,12 +184,12 @@ async function publishToGitHub(
   try {
     const existing = execSync(
       `gh pr view --json number,url --jq '.number'`,
-      { cwd: checkoutPath, encoding: "utf-8", ...ghEnv },
+      { cwd: checkoutPath, encoding: "utf-8", ...devEnv },
     ).trim();
     prNumber = parseInt(existing, 10);
     prUrl = execSync(
       `gh pr view --json url --jq '.url'`,
-      { cwd: checkoutPath, encoding: "utf-8", ...ghEnv },
+      { cwd: checkoutPath, encoding: "utf-8", ...devEnv },
     ).trim();
     console.log(`Found existing PR #${prNumber}: ${prUrl}`);
 
@@ -192,7 +197,7 @@ async function publishToGitHub(
     if (state.description) {
       execFileSync(
         "gh", ["pr", "edit", String(prNumber), "--body", state.description],
-        { cwd: checkoutPath, stdio: "pipe", ...ghEnv },
+        { cwd: checkoutPath, stdio: "pipe", ...devEnv },
       );
     }
   } catch {
@@ -201,7 +206,7 @@ async function publishToGitHub(
     const body = state.description || "";
     const result = execFileSync(
       "gh", ["pr", "create", "--title", title, "--body", body, "--base", pr.baseBranch],
-      { cwd: checkoutPath, encoding: "utf-8", ...ghEnv },
+      { cwd: checkoutPath, encoding: "utf-8", ...devEnv },
     ).toString().trim();
     prUrl = result;
     // Extract PR number from URL
@@ -232,7 +237,7 @@ async function publishToGitHub(
       try {
         execSync(
           `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/reviews --input -`,
-          { cwd: checkoutPath, input: payload, stdio: ["pipe", "pipe", "pipe"], ...ghEnv },
+          { cwd: checkoutPath, input: payload, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
         );
       } catch {
         // If batch fails, post summary + comments individually
@@ -246,7 +251,7 @@ async function publishToGitHub(
           try {
             execSync(
               `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/reviews --input -`,
-              { cwd: checkoutPath, input: summaryPayload, stdio: ["pipe", "pipe", "pipe"], ...ghEnv },
+              { cwd: checkoutPath, input: summaryPayload, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
             );
           } catch { /* skip */ }
         }
@@ -259,7 +264,7 @@ async function publishToGitHub(
             });
             execSync(
               `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/reviews --input -`,
-              { cwd: checkoutPath, input: singlePayload, stdio: ["pipe", "pipe", "pipe"], ...ghEnv },
+              { cwd: checkoutPath, input: singlePayload, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
             );
           } catch {
             // Fall back to issue comment
@@ -268,7 +273,7 @@ async function publishToGitHub(
             });
             execSync(
               `gh api repos/${pr.owner}/${pr.repo}/issues/${prNumber}/comments --input -`,
-              { cwd: checkoutPath, input: fallbackPayload, stdio: ["pipe", "pipe", "pipe"], ...ghEnv },
+              { cwd: checkoutPath, input: fallbackPayload, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
             );
           }
         }
@@ -282,49 +287,66 @@ async function publishToGitHub(
       });
       execSync(
         `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/reviews --input -`,
-        { cwd: checkoutPath, input: payload, stdio: ["pipe", "pipe", "pipe"], ...ghEnv },
+        { cwd: checkoutPath, input: payload, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
       );
     }
 
-    // Post thread replies
+  }
+
+  // 4. Fetch all GitHub PR review comments for matching local → GitHub IDs.
+  // Used for both inline replies and resolved reactions.
+  let ghComments: Array<{ id: number; path: string; line: number | null; body: string }> = [];
+  try {
+    const commentsJson = execSync(
+      `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/comments --paginate`,
+      { cwd: checkoutPath, encoding: "utf-8", ...devEnv },
+    );
+    // --paginate concatenates JSON arrays: [...][...] — merge into one array
+    const raw = commentsJson.trim();
+    ghComments = JSON.parse(raw.replace(/\]\s*\[/g, ","));
+  } catch {
+    console.error("  Could not fetch PR comments for thread matching.");
+  }
+
+  // 5. Post inline thread replies as the developer (writer role)
+  for (const review of state.reviews) {
     for (const comment of review.comments) {
       for (const reply of comment.replies) {
         console.log(`  Posting reply to ${comment.id.slice(0, 8)}...`);
-        const replyBody = `> Re: ${comment.path}:${comment.line}\n\n${reply.body}` +
-          makeFooter(comment.id, undefined, "writer");
-        const fallbackPayload = JSON.stringify({ body: replyBody });
+        const replyBody = reply.body + makeFooter(comment.id, undefined, "writer");
+
+        // Find the GitHub comment ID via thread:: tag to post an inline reply
+        const match = ghComments.find(
+          (gc) => gc.body.includes(`thread::${comment.id}`),
+        );
+        if (match) {
+          try {
+            execSync(
+              `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/comments/${match.id}/replies --input -`,
+              { cwd: checkoutPath, input: JSON.stringify({ body: replyBody }), stdio: ["pipe", "pipe", "pipe"], ...devEnv },
+            );
+            continue;
+          } catch { /* fall through to issue comment */ }
+        }
+
+        // Fallback: post as top-level issue comment with context
+        const fallbackBody = `> Re: ${comment.path}:${comment.line}\n\n${replyBody}`;
         execSync(
           `gh api repos/${pr.owner}/${pr.repo}/issues/${prNumber}/comments --input -`,
-          { cwd: checkoutPath, input: fallbackPayload, stdio: ["pipe", "pipe", "pipe"], ...ghEnv },
+          { cwd: checkoutPath, input: JSON.stringify({ body: fallbackBody }), stdio: ["pipe", "pipe", "pipe"], ...devEnv },
         );
       }
     }
   }
 
-  // 4. Post resolved reactions on PR review comments.
-  // Note: replies above go to issue comments (different API), so their footer
-  // tags won't appear in the PR review comments fetched here — no collision risk.
+  // 6. Post resolved reactions
   const resolvedIds = await backend.fetchResolvedThreadIds(pr);
   if (resolvedIds.size > 0) {
     console.log(`Posting reactions for ${resolvedIds.size} resolved comment(s)...`);
-    let ghComments: Array<{ id: number; path: string; line: number | null; body: string }> = [];
-    try {
-      const commentsJson = execSync(
-        `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/comments --paginate`,
-        { cwd: checkoutPath, encoding: "utf-8", ...ghEnv },
-      );
-      // --paginate concatenates JSON arrays: [...][...] — merge into one array
-      const raw = commentsJson.trim();
-      ghComments = JSON.parse(raw.replace(/\]\s*\[/g, ","));
-    } catch {
-      console.error("  Could not fetch PR comments for reaction matching.");
-    }
-
     for (const review of state.reviews) {
       for (const comment of review.comments) {
         if (!resolvedIds.has(comment.id)) continue;
 
-        // Match by thread:: tag embedded in the comment footer
         const match = ghComments.find(
           (gc) => gc.body.includes(`thread::${comment.id}`),
         );
@@ -341,7 +363,7 @@ async function publishToGitHub(
                 cwd: checkoutPath,
                 input: JSON.stringify({ content: reaction }),
                 stdio: ["pipe", "pipe", "pipe"],
-                ...ghEnv,
+                ...botEnv,
               },
             );
           } catch { /* reaction may already exist */ }
@@ -361,7 +383,7 @@ async function publishToGitHub(
     try {
       execSync(
         `gh api repos/${pr.owner}/${pr.repo}/issues/${prNumber}/labels/${label} -X DELETE`,
-        { cwd: checkoutPath, stdio: ["pipe", "pipe", "pipe"], ...ghEnv },
+        { cwd: checkoutPath, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
       );
     } catch { /* label not present */ }
   }
@@ -371,7 +393,7 @@ async function publishToGitHub(
       cwd: checkoutPath,
       input: JSON.stringify({ labels: [state.label] }),
       stdio: ["pipe", "pipe", "pipe"],
-      ...ghEnv,
+      ...botEnv,
     },
   );
 
