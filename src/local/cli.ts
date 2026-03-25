@@ -18,7 +18,8 @@ const execFileAsync = promisify(execFile);
 /**
  * Resolve a (possibly prefix-based) comment ID to the full UUID by scanning
  * all reviews in the given backend state.  Returns `undefined` when no match
- * is found.
+ * is found.  If multiple comments share the same prefix, returns the first
+ * match — callers typically paste IDs from CLI output so collisions are rare.
  */
 function resolveCommentId(
   backend: LocalStateBackend,
@@ -306,7 +307,7 @@ async function publishToGitHub(
     let ghComments: Array<{ id: number; path: string; line: number | null; body: string }> = [];
     try {
       const commentsJson = execSync(
-        `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/comments --paginate --jq '[.[] | {id, path, line, body}]'`,
+        `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/comments --paginate --slurp --jq '[.[][] | {id, path, line, body}]'`,
         { cwd: checkoutPath, encoding: "utf-8", ...ghEnv },
       );
       ghComments = JSON.parse(commentsJson);
