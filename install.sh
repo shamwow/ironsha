@@ -32,6 +32,24 @@ echo "Installed pr-review-check.sh → $CLAUDE_SCRIPT_DIR/pr-review-check.sh (sy
 # Clean up old hook names
 rm -f "$CLAUDE_SCRIPT_DIR/stop-hook.sh" "$CLAUDE_SCRIPT_DIR/revision-hook.sh"
 
+# --- qmd (lesson search) ---
+if command -v qmd &>/dev/null; then
+  LESSONS_DIR="$SCRIPT_DIR/.lessons"
+  if [ -d "$LESSONS_DIR" ]; then
+    # Add the .lessons directory as a qmd collection (idempotent — removes first if exists)
+    qmd collection remove lessons 2>/dev/null || true
+    qmd collection add "$LESSONS_DIR" --name lessons 2>/dev/null || \
+      qmd collection add "$LESSONS_DIR" 2>/dev/null || true
+    # Build embeddings so vec: queries work
+    qmd embed 2>/dev/null || true
+    echo "Indexed .lessons/ into qmd collection 'lessons'"
+  else
+    echo "Warning: .lessons/ directory not found — skipping qmd setup"
+  fi
+else
+  echo "Warning: qmd not found — lesson search will not work. Install qmd and re-run."
+fi
+
 # Add Stop hooks to enforce lesson lookup, revision, and PR review
 CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
 QUERY_HOOK_CMD="${CLAUDE_SCRIPT_DIR}/lessons-query-check.sh"
@@ -80,3 +98,4 @@ echo ""
 echo "Done. Available:"
 echo "  Agents:   implement, plan"
 echo "  Commands: /learn, /save, /load"
+echo "  Lessons:  qmd query (searches .lessons/)"

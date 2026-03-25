@@ -443,3 +443,8 @@
 {"level":30,"time":1774404467063,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","comments":1,"threads":0,"reviewId":"c887227a-eab6-4005-913b-cdde93795ac4","msg":"Architecture pass complete"}
 {"level":30,"time":1774404467063,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","msg":"Architecture pass found issues, skipping detailed review"}
 {"level":30,"time":1774404467063,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","msg":"Review has unresolved items, requesting changes"}
+{"level":30,"time":1774406089442,"pid":36649,"hostname":"Ironshas-Mini.lan","path":"src/foo.ts","originalLine":16,"snappedLine":14,"msg":"Snapped comment to nearest diff line"}
+{"level":30,"time":1774406089443,"pid":36649,"hostname":"Ironshas-Mini.lan","path":"src/foo.ts","line":100,"msg":"Comment line not in diff, converting to general comment"}
+{"level":30,"time":1774406089443,"pid":36649,"hostname":"Ironshas-Mini.lan","path":"src/unknown.ts","line":5,"msg":"Comment file not in diff, converting to general comment"}
+{"level":30,"time":1774406089443,"pid":36649,"hostname":"Ironshas-Mini.lan","path":"src/foo.ts","line":50,"msg":"Comment line not in diff, converting to general comment"}
+{"level":30,"time":1774406089443,"pid":36649,"hostname":"Ironshas-Mini.lan","path":"nope.ts","line":1,"msg":"Comment file not in diff, converting to general comment"}
