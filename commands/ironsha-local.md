@@ -117,8 +117,9 @@ Spawn a **fix subagent** with instructions that include:
 
 After the fix subagent completes:
 
-1. For each thread it addressed, resolve it:
+1. For each thread it addressed, first post the fix explanation as a reply, then resolve it:
    ```bash
+   npm run state -- reply <comment-id> --body "<explanation from threads_addressed>"
    npm run state -- resolve <comment-id>
    ```
 
@@ -147,8 +148,9 @@ npm run state -- publish
 This will:
 1. Push the branch to GitHub
 2. Create (or update) the PR with the stored description
-3. Post all review comments and thread history from local state
-4. Set the `human-review-needed` label
+3. Post all review comments and thread history from local state with footer tags for thread tracking
+4. Sync resolved reactions (rocket + thumbs-up) to GitHub PR comments
+5. Set the `human-review-needed` label
 
 Print the PR URL when done.
 
