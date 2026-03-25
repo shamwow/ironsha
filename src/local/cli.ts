@@ -447,8 +447,8 @@ async function publishToGitHub(
   console.log(`\nPublished: ${prUrl}`);
 }
 
-async function main(): Promise<void> {
-  const { command, subcommand, positional, flags } = parseArgs(process.argv);
+export async function main(argv: string[] = process.argv): Promise<void> {
+  const { command, subcommand, positional, flags } = parseArgs(argv);
   const checkoutPath = flags["checkout-path"] ?? process.cwd();
   const baseBranch = flags["base-branch"] ?? "main";
   const stateDir = flags["state-dir"] ?? join(checkoutPath, ".ironsha");
@@ -688,7 +688,10 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Allow direct execution
+if (process.argv[1]?.endsWith("cli.ts") || process.argv[1]?.endsWith("cli.js")) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

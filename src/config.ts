@@ -39,7 +39,6 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
       "/tmp/ironsha/transcripts",
       env,
     ),
-    LOG_LEVEL: optionalEnvFrom("LOG_LEVEL", "info", env),
   } as const;
 }
 

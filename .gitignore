@@ -5,3 +5,5 @@ dist/
 logs/
 .claude/
 .ironsha/
+.plan.md
+.worktrees/
