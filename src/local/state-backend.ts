@@ -9,7 +9,8 @@ import type {
   LocalPRState,
   LocalReview,
   LocalReviewComment,
-  BotLabel,
+  PassLabel,
+  StatusLabel,
 } from "./types.js";
 import { parseGitDiffToFilePatches } from "./git-diff-parser.js";
 import { logger } from "../logger.js";
@@ -30,6 +31,7 @@ export class LocalStateBackend implements StateBackend {
       version: 1,
       pr,
       label: "bot-review-needed",
+      passLabels: [],
       checkoutPath,
       reviews: [],
       createdAt: now,
@@ -51,8 +53,12 @@ export class LocalStateBackend implements StateBackend {
     return this.state;
   }
 
-  getLabel(): BotLabel {
+  getLabel(): StatusLabel {
     return this.state.label;
+  }
+
+  getPassLabels(): PassLabel[] {
+    return [...this.state.passLabels];
   }
 
   async setDescription(description: string): Promise<void> {
@@ -201,7 +207,38 @@ export class LocalStateBackend implements StateBackend {
   }
 
   async setLabel(_pr: PRInfo, label: string): Promise<void> {
-    this.state.label = label as BotLabel;
+    this.state.label = label as StatusLabel;
+    await this.persist();
+  }
+
+  async addPassLabel(_pr: PRInfo, label: PassLabel): Promise<void> {
+    if (!this.state.passLabels.includes(label)) {
+      this.state.passLabels.push(label);
+      await this.persist();
+    }
+  }
+
+  async removePassLabel(_pr: PRInfo, label: PassLabel): Promise<void> {
+    const next = this.state.passLabels.filter((entry) => entry !== label);
+    if (next.length !== this.state.passLabels.length) {
+      this.state.passLabels = next;
+      await this.persist();
+    }
+  }
+
+  hasPassLabel(label: PassLabel): boolean {
+    return this.state.passLabels.includes(label);
+  }
+
+  async clearPassLabels(_pr: PRInfo): Promise<void> {
+    if (this.state.passLabels.length > 0) {
+      this.state.passLabels = [];
+      await this.persist();
+    }
+  }
+
+  async setPassLabels(_pr: PRInfo, labels: PassLabel[]): Promise<void> {
+    this.state.passLabels = [...new Set(labels)];
     await this.persist();
   }
 

@@ -8,18 +8,27 @@ import { buildDiffableLines } from "../github/diff-lines.js";
 import { validateComments } from "../github/comment-validator.js";
 import { config } from "../config.js";
 import type { PRInfo } from "../review/types.js";
-import type { BotLabel } from "./types.js";
+import type { BotLabel, PassLabel } from "./types.js";
 
 const VALID_LABELS: readonly string[] = [
   "bot-review-needed", "bot-changes-needed",
-  "human-review-needed", "bot-human-intervention",
+  "bot-human-intervention", "agent-code-review-passed",
+  "agent-qa-review-passed",
 ];
 
-/** Labels that can be set directly via `label set`. `human-review-needed` is
- *  excluded — it can only be set by `review post` when the review passes. */
+/** Pass labels are excluded — they can only be set by automated review phases. */
 const DIRECTLY_SETTABLE_LABELS: readonly string[] = [
   "bot-review-needed", "bot-changes-needed", "bot-human-intervention",
 ];
+
+const REQUIRED_PASS_LABELS: readonly PassLabel[] = [
+  "agent-code-review-passed",
+  "agent-qa-review-passed",
+];
+
+function passLabelForPhase(phase: string | undefined): PassLabel {
+  return phase === "qa" ? "agent-qa-review-passed" : "agent-code-review-passed";
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -57,6 +66,9 @@ Commands:
   label
       Print the current label
 
+  pass-labels
+      Print the earned pass labels
+
   label set <label>
       Set the label (bot-review-needed, bot-changes-needed, etc.)
 
@@ -66,7 +78,7 @@ Commands:
   reviews
       List all reviews with their inline comments
 
-  review post --json <json>
+  review post --phase <code|qa> --json <json>
       Post a review from JSON: { comments: [{path,line,body}], summary, event }
 
   resolve <comment-id>
@@ -474,10 +486,11 @@ async function publishToGitHub(
   }
 
   // 8. Set label
-  console.log(`Setting label: ${state.label}`);
+  console.log(`Setting labels: ${[state.label, ...state.passLabels].join(", ")}`);
   const botLabels = [
     "bot-review-needed", "bot-changes-needed",
-    "human-review-needed", "bot-human-intervention",
+    "bot-human-intervention", "agent-code-review-passed",
+    "agent-qa-review-passed",
   ];
   for (const label of botLabels) {
     try {
@@ -487,11 +500,46 @@ async function publishToGitHub(
       );
     } catch { /* label not present */ }
   }
+  const labelsToApply = new Set<string>(state.passLabels);
+  if (state.label !== "bot-review-needed" || labelsToApply.size === 0) {
+    labelsToApply.add(state.label);
+  }
   runGh(
     ["api", `${repoPath}/issues/${prNumber}/labels`, "--input", "-"],
     botEnv,
-    { input: JSON.stringify({ labels: [state.label] }) },
+    { input: JSON.stringify({ labels: Array.from(labelsToApply) }) },
   );
+
+  if (REQUIRED_PASS_LABELS.every((label) => state.passLabels.includes(label))) {
+    if (!ghToken) {
+      throw new Error(
+        "GITHUB_TOKEN is required to submit the final approval review after code review and QA both pass.",
+      );
+    }
+    const appliedLabels = JSON.parse(
+      runGh(
+        ["api", `${repoPath}/issues/${prNumber}/labels`],
+        botEnv,
+        { encoding: "utf-8" },
+      ),
+    ) as Array<{ name: string }>;
+    const applied = new Set(appliedLabels.map((entry) => entry.name));
+    if (!REQUIRED_PASS_LABELS.every((label) => applied.has(label))) {
+      throw new Error("Refusing to submit final approval review before both pass labels are present on the PR.");
+    }
+
+    runGh(
+      ["api", `${repoPath}/pulls/${prNumber}/reviews`, "--input", "-"],
+      botEnv,
+      {
+        input: JSON.stringify({
+          body: "Automated code review and QA review passed.",
+          event: "APPROVE",
+          comments: [],
+        }),
+      },
+    );
+  }
 
   console.log(`\nPublished: ${prUrl}`);
 }
@@ -527,6 +575,11 @@ export async function main(argv: string[] = process.argv): Promise<void> {
       break;
     }
 
+    case "pass-labels": {
+      console.log(JSON.stringify(backend.getPassLabels()));
+      break;
+    }
+
     case "label": {
       if (subcommand === "set") {
         const label = positional[1];
@@ -535,8 +588,8 @@ export async function main(argv: string[] = process.argv): Promise<void> {
           process.exit(1);
         }
         if (!DIRECTLY_SETTABLE_LABELS.includes(label)) {
-          if (label === "human-review-needed") {
-            console.error(`Cannot set human-review-needed directly — it is set automatically by 'review post' when the review passes.`);
+          if (label === "agent-code-review-passed" || label === "agent-qa-review-passed") {
+            console.error(`Cannot set ${label} directly — it is set automatically by automated review phases when they pass.`);
           } else {
             console.error(`Invalid label: ${label}`);
             console.error(`Valid labels: ${DIRECTLY_SETTABLE_LABELS.join(", ")}`);
@@ -610,8 +663,13 @@ export async function main(argv: string[] = process.argv): Promise<void> {
 
       if (subcommand === "post") {
         const jsonStr = flags["json"];
+        const phase = flags["phase"];
         if (!jsonStr) {
-          console.error("Usage: ironsha-state review post --json '<json>'");
+          console.error("Usage: ironsha-state review post --phase <code|qa> --json '<json>'");
+          process.exit(1);
+        }
+        if (phase !== "code" && phase !== "qa") {
+          console.error("Usage: ironsha-state review post --phase <code|qa> --json '<json>'");
           process.exit(1);
         }
         let data: {
@@ -642,20 +700,25 @@ export async function main(argv: string[] = process.argv): Promise<void> {
             event = unresolvedCount > 0 ? "COMMENT" : "APPROVE";
           }
         }
-        await backend.postReview(pr, comments, data.summary ?? "", event);
+        const passLabel = passLabelForPhase(phase);
+        const persistedEvent = event === "APPROVE" ? "COMMENT" : event;
+        await backend.postReview(pr, comments, data.summary ?? "", persistedEvent);
 
         // Set label based on outcome (reuse cached unresolved count)
         if (comments.length > 0) {
+          await backend.removePassLabel(pr, passLabel);
           await backend.setLabel(pr, "bot-changes-needed");
           console.log(`Posted review with ${comments.length} comment(s). Label: bot-changes-needed`);
         } else {
           unresolvedCount ??= await backend.fetchUnresolvedThreadCount(pr);
-          if (unresolvedCount > 0) {
+          if (event !== "APPROVE" || unresolvedCount > 0) {
+            await backend.removePassLabel(pr, passLabel);
             await backend.setLabel(pr, "bot-changes-needed");
             console.log(`Posted clean review but ${unresolvedCount} unresolved thread(s) remain. Label: bot-changes-needed`);
           } else {
-            await backend.setLabel(pr, "human-review-needed");
-            console.log(`Approved. Label: human-review-needed`);
+            await backend.addPassLabel(pr, passLabel);
+            await backend.setLabel(pr, "bot-review-needed");
+            console.log(`Approved. Pass label: ${passLabel}`);
           }
         }
       }

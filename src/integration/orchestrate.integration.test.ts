@@ -128,6 +128,11 @@ function createMockClaudeScript(): string {
     "    return;",
     "  }",
     "",
+    '  if (prompt.includes("You are a QA engineer reviewing an implementation plan.")) {',
+    "    emit(PLAN);",
+    "    return;",
+    "  }",
+    "",
     '  if (prompt.includes("You are a software engineer implementing a plan.")) {',
     '    const targetDir = join(process.cwd(), "src");',
     "    mkdirSync(targetDir, { recursive: true });",
@@ -152,7 +157,17 @@ function createMockClaudeScript(): string {
     "    return;",
     "  }",
     "",
+    '  if (prompt.includes("You are a QA reviewer validating that the implemented feature works at the product level.")) {',
+    '    emit(["```json", "{\\"comments\\":[],\\"summary\\":\\"Mock QA approval after validating the feature end to end.\\",\\"event\\":\\"APPROVE\\"}", "```"].join("\\n"));',
+    "    return;",
+    "  }",
+    "",
     '  if (prompt.includes("Address all UNRESOLVED threads.")) {',
+    "    emit(buildFixResponse(prompt));",
+    "    return;",
+    "  }",
+    "",
+    '  if (prompt.includes("You are an engineer addressing QA review findings.")) {',
     "    emit(buildFixResponse(prompt));",
     "    return;",
     "  }",
@@ -240,6 +255,8 @@ function createMockCodexScript(): string {
     "    finalMessage = PLAN;",
     '  } else if (prompt.includes("You are a senior engineer reviewing an implementation plan.")) {',
     "    finalMessage = PLAN;",
+    '  } else if (prompt.includes("You are a QA engineer reviewing an implementation plan.")) {',
+    "    finalMessage = PLAN;",
     '  } else if (prompt.includes("You are a software engineer implementing a plan.")) {',
     '    const targetDir = join(process.cwd(), "src");',
     "    mkdirSync(targetDir, { recursive: true });",
@@ -255,7 +272,11 @@ function createMockCodexScript(): string {
     '    ].join("\\n");',
     '  } else if (prompt.includes("Perform BOTH architecture and detailed review in a single pass.")) {',
     "    finalMessage = buildReviewResponse(prompt);",
+    '  } else if (prompt.includes("You are a QA reviewer validating that the implemented feature works at the product level.")) {',
+    '    finalMessage = ["```json", "{\\"comments\\":[],\\"summary\\":\\"Mock QA approval after validating the feature end to end.\\",\\"event\\":\\"APPROVE\\"}", "```"].join("\\n");',
     '  } else if (prompt.includes("Address all UNRESOLVED threads.")) {',
+    "    finalMessage = buildFixResponse(prompt);",
+    '  } else if (prompt.includes("You are an engineer addressing QA review findings.")) {',
     "    finalMessage = buildFixResponse(prompt);",
     "  }",
     "",
@@ -377,6 +398,7 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
           "Complete the task in src/task.txt and open a PR",
           "--plan-llm", "codex:gpt-5.4",
           "--review-llm", "codex:gpt-5.4",
+          "--qa-llm", "codex:gpt-5.4",
           "--implement-llm", "codex:gpt-5.4",
           "--pr-llm", "codex:gpt-5.4",
         ],
@@ -440,11 +462,18 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
       assert.match(prData.body, /`src\/task\.txt`/);
       assert.match(prData.body, /`node scripts\/verify-task\.js`/);
       assert.ok(
-        prData.labels.some((label) => label.name === "human-review-needed"),
-        "Expected published PR to have human-review-needed label",
+        prData.labels.some((label) => label.name === "agent-code-review-passed"),
+        "Expected published PR to have the code review pass label",
       );
       assert.ok(
-        prData.reviews.some((review) => review.state === "APPROVED"),
+        prData.labels.some((label) => label.name === "agent-qa-review-passed"),
+        "Expected published PR to have the QA review pass label",
+      );
+      assert.ok(
+        prData.reviews.some((review) =>
+          review.state === "APPROVED" &&
+          /Automated code review and QA review passed/.test(review.body ?? "")
+        ),
         "Expected published PR to contain an approval review",
       );
 

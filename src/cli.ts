@@ -10,6 +10,7 @@ import {
   ProviderOutputCollector,
 } from "./llm/provider-runtime.js";
 import type { AgentProvider } from "./config.js";
+import type { PassLabel } from "./local/types.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,6 +25,7 @@ interface OrchestrateOptions {
   task: string;
   planLlm: LlmConfig;
   reviewLlm: LlmConfig;
+  qaLlm: LlmConfig;
   implementLlm: LlmConfig;
   prLlm: LlmConfig;
   reviewIterations: number;
@@ -47,6 +49,7 @@ const USAGE = `Usage: ironsha build "<task description>" [options]
 Options:
   --plan-llm <provider:model>       LLM for planning (default: claude:claude-opus-4-6)
   --review-llm <provider:model>     LLM for plan review (default: claude:claude-opus-4-6)
+  --qa-llm <provider:model>         LLM for QA plan/pr review (default: claude:claude-opus-4-6)
   --implement-llm <provider:model>  LLM for implementation (default: claude:claude-opus-4-6)
   --pr-llm <provider:model>         LLM for PR review (default: claude:claude-opus-4-6)
   --review-iterations <n>           Plan review cycles (default: 1)
@@ -130,6 +133,7 @@ function parseArgs(argv: string[]): OrchestrateOptions {
     task,
     planLlm: flags["plan-llm"] ? parseLlm(flags["plan-llm"]) : DEFAULT_LLM,
     reviewLlm: flags["review-llm"] ? parseLlm(flags["review-llm"]) : DEFAULT_LLM,
+    qaLlm: flags["qa-llm"] ? parseLlm(flags["qa-llm"]) : DEFAULT_LLM,
     implementLlm: flags["implement-llm"] ? parseLlm(flags["implement-llm"]) : DEFAULT_LLM,
     prLlm: flags["pr-llm"] ? parseLlm(flags["pr-llm"]) : DEFAULT_LLM,
     reviewIterations: flags["review-iterations"] ? parseInt(flags["review-iterations"], 10) : 1,
@@ -430,6 +434,18 @@ function uiEvidenceInstructions(platform: string | null): string[] {
   ];
 }
 
+export function buildQaPlanReviewPrompt(task: string, plan: string): string {
+  return [
+    readPromptFile("qa-plan-review.md"),
+    "",
+    "## Original Task",
+    task,
+    "",
+    "## Current Plan",
+    plan,
+  ].join("\n");
+}
+
 export function buildImplementPrompt(plan: string, platform: string | null): string {
   const instructions = [
     "- Implement each step of the plan in order",
@@ -468,6 +484,25 @@ export function buildPrDescriptionPrompt(platform: string | null): string {
 
   lines.push("", "Output ONLY the description text, no other commentary.");
   return lines.join("\n");
+}
+
+type LocalStateSnapshot = {
+  label: string;
+  passLabels?: string[];
+  description?: string;
+};
+
+function readLocalState(cwd: string): LocalStateSnapshot {
+  return JSON.parse(runStateCmd(cwd, ["show"])) as LocalStateSnapshot;
+}
+
+function hasPassLabel(cwd: string, label: PassLabel): boolean {
+  return (readLocalState(cwd).passLabels ?? []).includes(label);
+}
+
+function extractJsonBlock(output: string): string | null {
+  const jsonMatch = output.match(/```json\s*([\s\S]*?)```/) ?? output.match(/(\{[\s\S]*\})/);
+  return jsonMatch ? jsonMatch[1].trim() : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -538,6 +573,20 @@ Respond with the complete updated Markdown plan. Nothing else.`;
   return currentPlan;
 }
 
+async function runQaPlanReviewPhase(opts: OrchestrateOptions, plan: string, cwd: string): Promise<string> {
+  log("QA-PLAN", `Starting with ${llmLabel(opts.qaLlm)}...`);
+  const updatedPlan = await runPrintMode(
+    opts.qaLlm,
+    buildQaPlanReviewPrompt(opts.task, plan),
+    cwd,
+    "qa-plan-review",
+  );
+  const planPath = join(cwd, ".plan.md");
+  writeFileSync(planPath, updatedPlan);
+  log("QA-PLAN", "Complete.");
+  return updatedPlan;
+}
+
 // ---------------------------------------------------------------------------
 // Phase 3: Implement
 // ---------------------------------------------------------------------------
@@ -571,14 +620,19 @@ function runStateCmd(
   }).trim();
 }
 
-async function runPrCiPhase(llm: LlmConfig, cwd: string, phase: string): Promise<void> {
+async function runPrCiPhase(
+  llm: LlmConfig,
+  cwd: string,
+  phase: string,
+  logPhase: string = "PR-REVIEW",
+): Promise<void> {
   const buildResult = await runBuildAndTests(cwd);
   if (buildResult.success) {
-    log("PR-REVIEW", "Local build/tests passed.");
+    log(logPhase, "Local build/tests passed.");
     return;
   }
 
-  log("PR-REVIEW", "Local build/tests failed; invoking fixer...");
+  log(logPhase, "Local build/tests failed; invoking fixer...");
   await runAgenticMode(
     llm,
     [
@@ -601,7 +655,130 @@ async function runPrCiPhase(llm: LlmConfig, cwd: string, phase: string): Promise
     throw new Error(`Local build/tests still failing after fix pass.\n${rerunResult.output}`);
   }
 
-  log("PR-REVIEW", "Local build/tests passed after fix.");
+  log(logPhase, "Local build/tests passed after fix.");
+}
+
+type ReviewLoopConfig = {
+  logPhase: string;
+  reviewLlm: LlmConfig;
+  reviewPhasePrefix: string;
+  fixPhasePrefix: string;
+  ciPhasePrefix: string;
+  reviewPhaseFlag: "code" | "qa";
+  passLabel: PassLabel;
+  approvalMessage: string;
+  reviewPrompt: (threadState: string) => string;
+  fixPrompt: (threadState: string) => string;
+};
+
+function buildCodeReviewPrompt(
+  basePrompt: string,
+  archPrompt: string,
+  detailedPrompt: string,
+  guideContent: string,
+  threadState: string,
+  baseBranch: string,
+): string {
+  return [
+    basePrompt,
+    "\n---\n",
+    archPrompt,
+    "\n---\n",
+    detailedPrompt,
+    guideContent ? `\n---\n${guideContent}` : "",
+    "\n---\n\n## Current Thread State\n",
+    threadState || "(no threads yet)",
+    `\n\n## Instructions\nReview the code. Read the diff with \`git diff origin/${baseBranch}...HEAD\`. Perform BOTH architecture and detailed review in a single pass. Output a single JSON block per the format above.`,
+  ].join("\n");
+}
+
+export function buildQaReviewPrompt(
+  qaPrompt: string,
+  threadState: string,
+  description: string,
+  baseBranch: string,
+): string {
+  return [
+    qaPrompt,
+    "\n---\n\n## Current PR Description\n",
+    description || "(no description)",
+    "\n---\n\n## Current Thread State\n",
+    threadState || "(no threads yet)",
+    `\n\n## Instructions\nReview the implemented feature from a QA perspective. Read the diff with \`git diff origin/${baseBranch}...HEAD\`. Verify the test plan exercises the feature at the product level. For UI changes, verify the PR description includes the right visual evidence, require video/GIF for interactive behavior, and confirm the screenshot/video artifacts actually show the implemented feature working correctly. Output a single JSON block per the format above.`,
+  ].join("\n");
+}
+
+async function runReviewFixLoop(cwd: string, config: ReviewLoopConfig): Promise<void> {
+  for (let cycle = 1; ; cycle++) {
+    log(config.logPhase, `--- Cycle ${cycle} ---`);
+
+    log(config.logPhase, "Running review...");
+    const threadState = runStateCmd(cwd, ["threads"]);
+    const reviewOutput = await runAgenticMode(
+      config.reviewLlm,
+      config.reviewPrompt(threadState),
+      cwd,
+      `${config.reviewPhasePrefix}-${cycle}`,
+    );
+
+    const reviewJson = extractJsonBlock(reviewOutput);
+    if (reviewJson) {
+      try {
+        runStateCmd(cwd, ["review", "post", "--phase", config.reviewPhaseFlag, "--json", reviewJson]);
+      } catch (err) {
+        log(config.logPhase, `Failed to post review: ${err}`);
+      }
+    } else {
+      log(config.logPhase, "Warning: could not extract JSON from review output");
+    }
+
+    const state = readLocalState(cwd);
+    log(config.logPhase, `Label after review: ${state.label}`);
+    log(config.logPhase, `Pass labels after review: ${(state.passLabels ?? []).join(", ") || "(none)"}`);
+
+    if (hasPassLabel(cwd, config.passLabel)) {
+      log(config.logPhase, config.approvalMessage);
+      break;
+    }
+
+    log(config.logPhase, "Running fix pass...");
+    const fixThreadState = runStateCmd(cwd, ["threads"]);
+    const fixOutput = await runAgenticMode(
+      config.reviewLlm,
+      config.fixPrompt(fixThreadState),
+      cwd,
+      `${config.fixPhasePrefix}-${cycle}`,
+    );
+
+    const fixJson = extractJsonBlock(fixOutput);
+    if (fixJson) {
+      try {
+        const fixResult = JSON.parse(fixJson) as {
+          threads_addressed?: Array<{ thread_id: string; explanation: string }>;
+        };
+        for (const thread of fixResult.threads_addressed ?? []) {
+          try {
+            runStateCmd(cwd, ["reply", thread.thread_id, "--body", thread.explanation]);
+            runStateCmd(cwd, ["resolve", thread.thread_id]);
+          } catch (err) {
+            log(config.logPhase, `Failed to resolve thread ${thread.thread_id}: ${err}`);
+          }
+        }
+      } catch {
+        log(config.logPhase, "Warning: could not parse fix output JSON");
+      }
+    }
+
+    try {
+      runGit(cwd, ["add", "-A"]);
+      runGit(cwd, ["commit", "-m", `orchestrate: address ${config.reviewPhaseFlag} review cycle ${cycle}`]);
+    } catch {
+      log(config.logPhase, "No changes to commit after fix pass.");
+    }
+
+    log(config.logPhase, "Re-running CI...");
+    await runPrCiPhase(config.reviewLlm, cwd, `${config.ciPhasePrefix}-${cycle}`, config.logPhase);
+  }
 }
 
 async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<void> {
@@ -660,96 +837,59 @@ async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<
       "Use the GitHub MCP tools to list all review comments and threads on this PR",
       "Review the thread state provided below",
     );
+  const qaReviewPromptBase = readPromptFile("qa-review.md");
+  const qaFixPromptBase = readPromptFile("qa-fix.md");
 
-  // --- Review/Fix Loop ---
-  for (let cycle = 1; ; cycle++) {
-    log("PR-REVIEW", `--- Cycle ${cycle} ---`);
-
-    // Step A: Review
-    log("PR-REVIEW", "Running review...");
-    const threadState = runStateCmd(cwd, ["threads"]);
-
-    const reviewPrompt = [
+  await runReviewFixLoop(cwd, {
+    logPhase: "PR-REVIEW",
+    reviewLlm: opts.prLlm,
+    reviewPhasePrefix: "pr-review",
+    fixPhasePrefix: "pr-fix",
+    ciPhasePrefix: "pr-ci",
+    reviewPhaseFlag: "code",
+    passLabel: "agent-code-review-passed",
+    approvalMessage: "Code review passed. Moving to QA review.",
+    reviewPrompt: (threadState) => buildCodeReviewPrompt(
       basePrompt,
-      "\n---\n",
       archPrompt,
-      "\n---\n",
       detailedPrompt,
-      guideContent ? `\n---\n${guideContent}` : "",
-      "\n---\n\n## Current Thread State\n",
-      threadState || "(no threads yet)",
-      `\n\n## Instructions\nReview the code. Read the diff with \`git diff origin/${baseBranch}...HEAD\`. Perform BOTH architecture and detailed review in a single pass. Output a single JSON block per the format above.`,
-    ].join("\n");
-
-    const reviewOutput = await runAgenticMode(opts.prLlm, reviewPrompt, cwd, `pr-review-${cycle}`);
-
-    // Extract JSON from output and post review
-    const jsonMatch = reviewOutput.match(/```json\s*([\s\S]*?)```/) ?? reviewOutput.match(/(\{[\s\S]*\})/);
-    if (jsonMatch) {
-      const reviewJson = jsonMatch[1].trim();
-      try {
-        runStateCmd(cwd, ["review", "post", "--json", reviewJson]);
-      } catch (err) {
-        log("PR-REVIEW", `Failed to post review: ${err}`);
-      }
-    } else {
-      log("PR-REVIEW", "Warning: could not extract JSON from review output");
-    }
-
-    // Check label
-    const label = runStateCmd(cwd, ["label"]);
-    log("PR-REVIEW", `Label after review: ${label}`);
-
-    if (label === "human-review-needed") {
-      log("PR-REVIEW", "Review approved! Moving to publish.");
-      break;
-    }
-
-    // Step B: Fix
-    log("PR-REVIEW", "Running fix pass...");
-    const fixThreadState = runStateCmd(cwd, ["threads"]);
-
-    const fixPrompt = [
+      guideContent,
+      threadState,
+      baseBranch,
+    ),
+    fixPrompt: (threadState) => [
       codeFixPrompt,
       "\n---\n\n## Current Thread State\n",
-      fixThreadState,
+      threadState,
       "\n\n## Instructions\nAddress all UNRESOLVED threads. Make code changes, run build/tests, then output the JSON result.",
-    ].join("\n");
+    ].join("\n"),
+  });
 
-    const fixOutput = await runAgenticMode(opts.prLlm, fixPrompt, cwd, `pr-fix-${cycle}`);
-
-    // Parse fix output and post replies/resolve threads
-    const fixJsonMatch = fixOutput.match(/```json\s*([\s\S]*?)```/) ?? fixOutput.match(/(\{[\s\S]*\})/);
-    if (fixJsonMatch) {
-      try {
-        const fixResult = JSON.parse(fixJsonMatch[1].trim()) as {
-          threads_addressed?: Array<{ thread_id: string; explanation: string }>;
-        };
-        for (const thread of fixResult.threads_addressed ?? []) {
-          try {
-            runStateCmd(cwd, ["reply", thread.thread_id, "--body", thread.explanation]);
-            runStateCmd(cwd, ["resolve", thread.thread_id]);
-          } catch (err) {
-            log("PR-REVIEW", `Failed to resolve thread ${thread.thread_id}: ${err}`);
-          }
-        }
-      } catch {
-        log("PR-REVIEW", "Warning: could not parse fix output JSON");
-      }
-    }
-
-    // Commit fixes
-    try {
-      runGit(cwd, ["add", "-A"]);
-      runGit(cwd, ["commit", "-m", `orchestrate: address review cycle ${cycle}`]);
-    } catch {
-      log("PR-REVIEW", "No changes to commit after fix pass.");
-    }
-
-    // Re-run CI
-    log("PR-REVIEW", "Re-running CI...");
-    await runPrCiPhase(opts.prLlm, cwd, `pr-ci-${cycle}`);
-  }
+  log("QA-REVIEW", `Starting with ${llmLabel(opts.qaLlm)}...`);
+  await runReviewFixLoop(cwd, {
+    logPhase: "QA-REVIEW",
+    reviewLlm: opts.qaLlm,
+    reviewPhasePrefix: "qa-review",
+    fixPhasePrefix: "qa-fix",
+    ciPhasePrefix: "qa-ci",
+    reviewPhaseFlag: "qa",
+    passLabel: "agent-qa-review-passed",
+    approvalMessage: "QA review passed. Moving to publish.",
+    reviewPrompt: (threadState) => buildQaReviewPrompt(
+      qaReviewPromptBase,
+      threadState,
+      runStateCmd(cwd, ["description"]),
+      baseBranch,
+    ),
+    fixPrompt: (threadState) => [
+      qaFixPromptBase,
+      "\n---\n\n## Current PR Description\n",
+      runStateCmd(cwd, ["description"]),
+      "\n---\n\n## Current Thread State\n",
+      threadState,
+      "\n\n## Instructions\nAddress all UNRESOLVED QA threads. Update the PR description and visual evidence artifacts if needed. Make code changes only where required, run build/tests, then output the JSON result.",
+    ].join("\n"),
+  });
 
   // Commit any outstanding changes before publish
   try {
@@ -761,12 +901,8 @@ async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<
 
   // Publish
   log("PR-REVIEW", "Publishing to GitHub...");
-  try {
-    const publishOutput = runStateCmd(cwd, ["publish"]);
-    log("PR-REVIEW", publishOutput);
-  } catch (err) {
-    log("PR-REVIEW", `Publish failed: ${err}`);
-  }
+  const publishOutput = runStateCmd(cwd, ["publish"]);
+  log("PR-REVIEW", publishOutput);
 
   log("PR-REVIEW", "Complete.");
 }
@@ -782,6 +918,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
   log("SETUP", "Configuration:");
   log("SETUP", `  Plan:      ${llmLabel(opts.planLlm)}${opts.skipPlan ? " (skipped)" : ""}`);
   log("SETUP", `  Review:    ${llmLabel(opts.reviewLlm)} x${opts.reviewIterations}${opts.skipReview ? " (skipped)" : ""}`);
+  log("SETUP", `  QA:        ${llmLabel(opts.qaLlm)}`);
   log("SETUP", `  Implement: ${llmLabel(opts.implementLlm)}${opts.skipImplement ? " (skipped)" : ""}`);
   log("SETUP", `  PR Review: ${llmLabel(opts.prLlm)}${opts.skipPr ? " (skipped)" : ""}`);
   log("SETUP", `  Transcripts: ${ensureLogDir()}`);
@@ -811,6 +948,12 @@ export async function main(argv: string[] = process.argv): Promise<void> {
       plan = await runReviewPhase(opts, plan, worktreePath);
     } else {
       log("REVIEW", "Skipped.");
+    }
+
+    if (!opts.skipReview) {
+      plan = await runQaPlanReviewPhase(opts, plan, worktreePath);
+    } else {
+      log("QA-PLAN", "Skipped.");
     }
 
     // Phase 3: Implement

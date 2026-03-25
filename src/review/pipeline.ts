@@ -295,14 +295,14 @@ export async function runReviewPipelineCore(
       log.info("Review has unresolved items, requesting changes");
       await backend.setLabel(pr, "bot-changes-needed");
     } else {
-      log.info("Review passed, marking for human review");
+      log.info("Review passed, marking code review as passed");
       if (merged.comments.length === 0) {
         await backend.postGeneralComment(
           pr,
           `LGTM! All review comments have been addressed.` + makeFooter(randomUUID(), reviewId, "reviewer"),
         );
       }
-      await backend.setLabel(pr, "human-review-needed");
+      await backend.setLabel(pr, "bot-review-needed");
     }
   } catch (err) {
     log.error({ err }, "Review pipeline failed");

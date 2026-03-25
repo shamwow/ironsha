@@ -4,6 +4,8 @@ import test from "node:test";
 process.env.GITHUB_TOKEN ??= "test-token";
 
 const {
+  buildQaPlanReviewPrompt,
+  buildQaReviewPrompt,
   buildImplementPrompt,
   buildPrDescriptionPrompt,
   formatSubprocessFailure,
@@ -79,4 +81,27 @@ test("buildPrDescriptionPrompt does not require Visual evidence for non-UI platf
   const prompt = buildPrDescriptionPrompt("golang");
 
   assert.doesNotMatch(prompt, /Visual evidence/i);
+});
+
+test("buildQaPlanReviewPrompt requires product-level test setup and verification", () => {
+  const prompt = buildQaPlanReviewPrompt("Add a button", "# Plan");
+
+  assert.match(prompt, /product-level test plan/i);
+  assert.match(prompt, /load the product into the state/i);
+  assert.match(prompt, /verify the feature/i);
+  assert.match(prompt, /UI changes/i);
+});
+
+test("buildQaReviewPrompt requires visual evidence validation for UI changes", () => {
+  const prompt = buildQaReviewPrompt(
+    "QA base prompt",
+    "No existing review threads.",
+    "**Visual evidence**\n- artifacts/demo.mp4",
+    "main",
+  );
+
+  assert.match(prompt, /Visual evidence/i);
+  assert.match(prompt, /video\/GIF/i);
+  assert.match(prompt, /actually show the implemented feature/i);
+  assert.match(prompt, /git diff origin\/main\.\.\.HEAD/);
 });
