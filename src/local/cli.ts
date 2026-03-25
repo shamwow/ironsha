@@ -152,15 +152,16 @@ async function publishToGitHub(
 ): Promise<void> {
   const state = backend.getState();
 
-  // Ensure gh CLI uses the correct token
+  // GITHUB_TOKEN is used for review comments, reactions, and labels (bot account).
+  // PR creation, editing, and viewing use the default gh auth (developer account).
   const ghToken = config.GITHUB_TOKEN;
   if (!ghToken) {
     console.warn(
-      "WARNING: GITHUB_TOKEN is not set. gh commands will use default auth, " +
+      "WARNING: GITHUB_TOKEN is not set. Review comments will use default gh auth, " +
       "which may post as the wrong account. Set GITHUB_TOKEN to the bot token.",
     );
   }
-  const ghEnv = ghToken
+  const botEnv = ghToken
     ? { env: { ...process.env, GH_TOKEN: ghToken } }
     : {};
 
@@ -179,12 +180,12 @@ async function publishToGitHub(
   try {
     const existing = execSync(
       `gh pr view --json number,url --jq '.number'`,
-      { cwd: checkoutPath, encoding: "utf-8", ...ghEnv },
+      { cwd: checkoutPath, encoding: "utf-8" },
     ).trim();
     prNumber = parseInt(existing, 10);
     prUrl = execSync(
       `gh pr view --json url --jq '.url'`,
-      { cwd: checkoutPath, encoding: "utf-8", ...ghEnv },
+      { cwd: checkoutPath, encoding: "utf-8" },
     ).trim();
     console.log(`Found existing PR #${prNumber}: ${prUrl}`);
 
@@ -192,7 +193,7 @@ async function publishToGitHub(
     if (state.description) {
       execFileSync(
         "gh", ["pr", "edit", String(prNumber), "--body", state.description],
-        { cwd: checkoutPath, stdio: "pipe", ...ghEnv },
+        { cwd: checkoutPath, stdio: "pipe" },
       );
     }
   } catch {
@@ -201,7 +202,7 @@ async function publishToGitHub(
     const body = state.description || "";
     const result = execFileSync(
       "gh", ["pr", "create", "--title", title, "--body", body, "--base", pr.baseBranch],
-      { cwd: checkoutPath, encoding: "utf-8", ...ghEnv },
+      { cwd: checkoutPath, encoding: "utf-8" },
     ).toString().trim();
     prUrl = result;
     // Extract PR number from URL
@@ -232,7 +233,7 @@ async function publishToGitHub(
       try {
         execSync(
           `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/reviews --input -`,
-          { cwd: checkoutPath, input: payload, stdio: ["pipe", "pipe", "pipe"], ...ghEnv },
+          { cwd: checkoutPath, input: payload, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
         );
       } catch {
         // If batch fails, post summary + comments individually
@@ -246,7 +247,7 @@ async function publishToGitHub(
           try {
             execSync(
               `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/reviews --input -`,
-              { cwd: checkoutPath, input: summaryPayload, stdio: ["pipe", "pipe", "pipe"], ...ghEnv },
+              { cwd: checkoutPath, input: summaryPayload, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
             );
           } catch { /* skip */ }
         }
@@ -259,7 +260,7 @@ async function publishToGitHub(
             });
             execSync(
               `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/reviews --input -`,
-              { cwd: checkoutPath, input: singlePayload, stdio: ["pipe", "pipe", "pipe"], ...ghEnv },
+              { cwd: checkoutPath, input: singlePayload, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
             );
           } catch {
             // Fall back to issue comment
@@ -268,7 +269,7 @@ async function publishToGitHub(
             });
             execSync(
               `gh api repos/${pr.owner}/${pr.repo}/issues/${prNumber}/comments --input -`,
-              { cwd: checkoutPath, input: fallbackPayload, stdio: ["pipe", "pipe", "pipe"], ...ghEnv },
+              { cwd: checkoutPath, input: fallbackPayload, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
             );
           }
         }
@@ -282,7 +283,7 @@ async function publishToGitHub(
       });
       execSync(
         `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/reviews --input -`,
-        { cwd: checkoutPath, input: payload, stdio: ["pipe", "pipe", "pipe"], ...ghEnv },
+        { cwd: checkoutPath, input: payload, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
       );
     }
 
@@ -295,7 +296,7 @@ async function publishToGitHub(
         const fallbackPayload = JSON.stringify({ body: replyBody });
         execSync(
           `gh api repos/${pr.owner}/${pr.repo}/issues/${prNumber}/comments --input -`,
-          { cwd: checkoutPath, input: fallbackPayload, stdio: ["pipe", "pipe", "pipe"], ...ghEnv },
+          { cwd: checkoutPath, input: fallbackPayload, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
         );
       }
     }
@@ -311,7 +312,7 @@ async function publishToGitHub(
     try {
       const commentsJson = execSync(
         `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/comments --paginate`,
-        { cwd: checkoutPath, encoding: "utf-8", ...ghEnv },
+        { cwd: checkoutPath, encoding: "utf-8", ...botEnv },
       );
       // --paginate concatenates JSON arrays: [...][...] — merge into one array
       const raw = commentsJson.trim();
@@ -341,7 +342,7 @@ async function publishToGitHub(
                 cwd: checkoutPath,
                 input: JSON.stringify({ content: reaction }),
                 stdio: ["pipe", "pipe", "pipe"],
-                ...ghEnv,
+                ...botEnv,
               },
             );
           } catch { /* reaction may already exist */ }
@@ -361,7 +362,7 @@ async function publishToGitHub(
     try {
       execSync(
         `gh api repos/${pr.owner}/${pr.repo}/issues/${prNumber}/labels/${label} -X DELETE`,
-        { cwd: checkoutPath, stdio: ["pipe", "pipe", "pipe"], ...ghEnv },
+        { cwd: checkoutPath, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
       );
     } catch { /* label not present */ }
   }
@@ -371,7 +372,7 @@ async function publishToGitHub(
       cwd: checkoutPath,
       input: JSON.stringify({ labels: [state.label] }),
       stdio: ["pipe", "pipe", "pipe"],
-      ...ghEnv,
+      ...botEnv,
     },
   );
 
