@@ -3,6 +3,7 @@ import { spawn, execSync } from "node:child_process";
 import { createWriteStream, readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { runBuildAndTests } from "./review/build-runner.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -263,6 +264,26 @@ function processStreamBuffer(buffer: string): ProcessedBuffer {
   return { text, resultText, remainder };
 }
 
+export function formatSubprocessFailure(
+  command: string,
+  code: number | null,
+  stderr: string,
+  output: string,
+): string {
+  const stderrText = stderr.trim();
+  const outputText = output.trim();
+  const combined = `${stderrText}\n${outputText}`;
+  if (/You've hit your limit|rate[_ ]limit/i.test(combined)) {
+    const detail = outputText || stderrText || "Provider rate limit reached.";
+    return `${command} hit provider rate limits.\n${detail}`;
+  }
+
+  const parts = [`${command} exited with code ${code}`];
+  if (stderrText) parts.push(`stderr: ${stderrText}`);
+  if (outputText) parts.push(`output: ${outputText}`);
+  return parts.join("\n");
+}
+
 /**
  * Run an LLM in print mode: pipe prompt via stdin, capture and return stdout.
  */
@@ -310,7 +331,7 @@ async function runPrintMode(llm: LlmConfig, prompt: string, cwd: string, phase: 
       if (code === 0) {
         resolve(output);
       } else {
-        reject(new Error(`${command} exited with code ${code}\nstderr: ${stderr}`));
+        reject(new Error(formatSubprocessFailure(command, code, stderr, output)));
       }
     });
 
@@ -368,7 +389,7 @@ async function runAgenticMode(llm: LlmConfig, prompt: string, cwd: string, phase
       if (code === 0) {
         resolve(output);
       } else {
-        reject(new Error(`${command} exited with code ${code}\nstderr: ${stderr}`));
+        reject(new Error(formatSubprocessFailure(command, code, stderr, output)));
       }
     });
 
@@ -576,12 +597,45 @@ function runStateCmd(cwd: string, stateArgs: string): string {
   }).trim();
 }
 
+async function runPrCiPhase(llm: LlmConfig, cwd: string, phase: string): Promise<void> {
+  const buildResult = await runBuildAndTests(cwd);
+  if (buildResult.success) {
+    log("PR-REVIEW", "Local build/tests passed.");
+    return;
+  }
+
+  log("PR-REVIEW", "Local build/tests failed; invoking fixer...");
+  await runAgenticMode(
+    llm,
+    [
+      "The project's build/test commands have already been discovered and run locally.",
+      "Do NOT search AGENTS.md, CLAUDE.md, README.md, or scan the repository for commands.",
+      "Use the failing output below to fix the issues, then re-run the same build/test commands until they all pass.",
+      "Only output a concise summary of what you fixed and confirm the commands passed.",
+      "",
+      "## Failing build/test output",
+      "```",
+      buildResult.output,
+      "```",
+    ].join("\n"),
+    cwd,
+    phase,
+  );
+
+  const rerunResult = await runBuildAndTests(cwd);
+  if (!rerunResult.success) {
+    throw new Error(`Local build/tests still failing after fix pass.\n${rerunResult.output}`);
+  }
+
+  log("PR-REVIEW", "Local build/tests passed after fix.");
+}
+
 async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<void> {
   log("PR-REVIEW", `Starting with ${llmLabel(opts.prLlm)}...`);
 
   // --- Setup ---
   log("PR-REVIEW", "Running CI (build/tests)...");
-  await runAgenticMode(opts.prLlm, `Discover build and test commands from AGENTS.md, CLAUDE.md, or README.md in this project. Run them all. If any fail, fix the issues and re-run until all pass. Only output a summary of what you ran and whether it passed.`, cwd, "pr-ci");
+  await runPrCiPhase(opts.prLlm, cwd, "pr-ci");
 
   log("PR-REVIEW", "Initializing local state...");
   runStateCmd(cwd, "init");
@@ -728,7 +782,17 @@ Output ONLY the description text, no other commentary.`,
 
     // Re-run CI
     log("PR-REVIEW", "Re-running CI...");
-    await runAgenticMode(opts.prLlm, `Run the project's build and test commands (from AGENTS.md, CLAUDE.md, or README.md). Fix any failures. Output a summary.`, cwd, `pr-ci-${cycle}`);
+    await runPrCiPhase(opts.prLlm, cwd, `pr-ci-${cycle}`);
+  }
+
+  // Commit any outstanding changes before publish
+  try {
+    execSync("git add -A && git commit -m 'orchestrate: final changes'", {
+      cwd,
+      stdio: "pipe",
+    });
+  } catch {
+    // Nothing to commit
   }
 
   // Publish

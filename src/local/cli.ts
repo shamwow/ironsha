@@ -332,10 +332,27 @@ async function publishToGitHub(
         event: review.event,
         comments: [],
       });
-      execSync(
-        `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/reviews --input -`,
-        { cwd: checkoutPath, input: payload, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
-      );
+      try {
+        execSync(
+          `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/reviews --input -`,
+          { cwd: checkoutPath, input: payload, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
+        );
+      } catch {
+        // APPROVE with body can fail if the review was already submitted; try as COMMENT
+        const fallbackPayload = JSON.stringify({
+          body: review.body + makeFooter(review.id, review.id, "reviewer"),
+          event: "COMMENT",
+          comments: [],
+        });
+        try {
+          execSync(
+            `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/reviews --input -`,
+            { cwd: checkoutPath, input: fallbackPayload, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
+          );
+        } catch {
+          console.error(`  Failed to post review ${review.id.slice(0, 8)}, skipping.`);
+        }
+      }
     }
 
   }
