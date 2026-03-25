@@ -3,7 +3,6 @@ import type { PRInfo } from "../review/types.js";
 export type BotLabel =
   | "bot-review-needed"
   | "bot-changes-needed"
-  | "bot-ci-pending"
   | "human-review-needed"
   | "bot-human-intervention";
 
@@ -45,6 +44,7 @@ export interface LocalPRState {
   pr: PRInfo;
   label: BotLabel;
   checkoutPath: string;
+  description?: string;
   reviews: LocalReview[];
   createdAt: string;
   updatedAt: string;

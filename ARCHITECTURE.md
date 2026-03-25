@@ -2,7 +2,7 @@
 
 ## Context
 
-`ironsha` is a polling daemon that drives a label-based PR review loop between GitHub and a code-capable LLM CLI. It supports four project families:
+`ironsha` is a local-first PR review toolkit that drives a label-based review loop using a code-capable LLM CLI. The review workflow runs entirely against local state (JSON files in `.ironsha/`) and publishes to GitHub only at the end. It supports four project families:
 
 - iOS (SwiftUI)
 - Android (Kotlin/Compose)
@@ -16,33 +16,30 @@ The runtime uses Claude Code as the agent provider.
 ```text
 ironsha/
 ├── src/
-│   ├── index.ts                   # Boot config, logger, and poller
-│   ├── poller.ts                  # Poll GitHub for labeled PRs
 │   ├── config.ts                  # Env parsing and provider selection
 │   ├── logger.ts                  # Pino logger
-│   ├── checkout/
-│   │   └── repo-manager.ts        # Clone/prune checkout dirs
-│   ├── github/
-│   │   ├── comments.ts            # Comment/thread helpers
-│   │   ├── labeler.ts             # Label mutation helpers
-│   │   └── review-poster.ts       # Pull-request review posting
+│   ├── local/
+│   │   ├── cli.ts                 # Local state management CLI
+│   │   ├── state-backend.ts       # File-based StateBackend implementation
+│   │   ├── types.ts               # Local state data structures
+│   │   └── git-diff-parser.ts     # Parse git diff into file patches
+│   ├── state/
+│   │   └── backend.ts             # StateBackend interface
 │   ├── review/
 │   │   ├── agent-runner.ts        # Claude Code agent runner
 │   │   ├── build-runner.ts        # Build/test discovery and execution
-│   │   ├── pipeline.ts            # Review orchestration
+│   │   ├── pipeline.ts            # Review orchestration (backend-agnostic)
 │   │   ├── platform-detector.ts   # Diff-based platform detection
 │   │   ├── result-parser.ts       # Parse review-pass JSON output
 │   │   └── types.ts               # Review pipeline types
+│   ├── github/
+│   │   ├── diff-lines.ts          # Parse PR diffs for valid comment lines
+│   │   └── comment-validator.ts   # Validate comments against diff
 │   ├── prompts/
 │   │   ├── prompt-builder.ts      # Prompt registry + model prompt assembly
 │   │   └── *.md                   # Prompt fragments
-│   ├── writer/
-│   │   ├── ci-handler.ts          # bot-ci-pending handler (label swap only, no comments)
-│   │   ├── ci-monitor.ts          # Check-run and status polling
-│   │   ├── git-ops.ts             # Merge/push helpers
-│   │   ├── pipeline.ts            # Code-fix orchestration
-│   │   ├── result-parser.ts       # Parse code-fix JSON output
-│   │   └── types.ts               # Write pipeline types
+│   ├── shared/
+│   │   └── footer.ts              # Thread/review UUID footer tags
 │   └── guides/                    # Platform-specific review guides
 ├── README.md
 └── .env.example
@@ -50,35 +47,29 @@ ironsha/
 
 ## Runtime Model
 
-### Poller
+### Local Review Pipeline
 
-Every poll cycle:
+The review pipeline (`src/review/pipeline.ts`) is backend-agnostic. All state operations go through the `StateBackend` interface (`src/state/backend.ts`). The `LocalStateBackend` stores state as JSON files in `.ironsha/`.
 
-1. Search GitHub for open PRs labeled `bot-review-needed`, `bot-changes-needed`, or `bot-ci-pending` using the Search API (`search.issuesAndPullRequests`). This collapses discovery into a single API call per label instead of iterating over every accessible repo.
-2. Dispatch each PR to the matching pipeline while deduplicating in-flight work with an in-memory set.
+Pipeline steps:
+1. Run build + tests (discovered from `AGENTS.md`, `CLAUDE.md`, or `README.md`)
+2. Detect platform from changed file extensions
+3. Architecture review pass (Claude Code agent)
+4. If no architecture issues: detailed review pass
+5. Post review results to local state
+6. Set label based on outcome
 
-### Shared Pipelines
+### Local State CLI
 
-The two agent-driven pipelines are:
+The CLI (`npm run state`) manages all local PR state:
 
-- Review pipeline: clone -> build/test gate -> architecture pass -> (if no issues) detailed pass -> post review (REQUEST_CHANGES) -> swap labels
-- Write pipeline: clone -> fetch base -> resolve merge conflicts -> code-fix pass -> build/test gate -> commit/push -> swap labels
+- `init` — create state file for current branch
+- `review post --json <json>` — store review with inline comments
+- `resolve <comment-id>` — mark thread as resolved (rocket + thumbs-up reactions)
+- `threads` — format thread state for the agent
+- `publish` — push branch, create GitHub PR, post all review history
 
-Both pipelines depend on the same runner contract:
-
-```ts
-runAgent({
-  provider,
-  checkoutPath,
-  promptPath,
-  userMessage,
-  githubToken,
-  maxTurns,
-  timeoutMs,
-  reviewId,
-  pass,
-})
-```
+State is stored in `.ironsha/{owner}-{repo}-{branch}.json`.
 
 ## Agent Runner
 
@@ -91,15 +82,14 @@ claude --print \
   --max-turns {MAX_REVIEW_TURNS} \
   --thinking enabled \
   --append-system-prompt-file {promptPath} \
-  --mcp-config {tempMcpConfigPath} \
   --dangerously-skip-permissions
 ```
 
 Details:
 
 - The combined prompt is passed as an appended system prompt file.
-- A temporary GitHub MCP config file is written per invocation.
-- `maxTurns` is enforced through Claude’s native CLI flag.
+- `maxTurns` is enforced through Claude's native CLI flag.
+- MCP GitHub config is omitted in local mode (`skipMcpGithub: true`).
 
 ## Prompt and Instruction Model
 
@@ -116,28 +106,23 @@ Matching precedence is:
 2. provider default
 3. built-in pass default
 
-The registry is the place to change prompt stacks for a model. No pipeline code changes are required when adjusting prompt composition.
-
 Default prompt templates are:
 
 ```text
 architecture-pass -> base.md + architecture-pass.md + platform guide
 detailed-pass     -> base.md + detailed-pass.md + platform guide
 code-fix          -> code-fix.md + platform guide
-merge-conflict    -> merge-conflict.md
 ```
-
-For example, a model-specific override can append an extra fragment for a particular Claude model while leaving every other pass on the default stack.
 
 Prompt expectations:
 
 - Output must still be a single JSON object matching the existing parser contract.
 - The agent is told to read project instructions from `AGENTS.md` and `CLAUDE.md` when present.
-- The agent uses GitHub MCP to inspect review threads on demand instead of receiving the full thread state in the prompt.
+- In local mode, thread state is provided inline instead of via GitHub MCP.
 
 ## Build/Test Gate
 
-Before any review or post-fix push, the bot runs project commands discovered from repository docs in this order:
+Before any review, the bot runs project commands discovered from repository docs in this order:
 
 1. `AGENTS.md`
 2. `CLAUDE.md`
@@ -151,13 +136,11 @@ Command extraction behavior:
 
 If build/tests fail before review:
 
-- Post the failure output to the PR.
-- Apply `bot-changes-needed`.
+- Post the failure output to local state.
+- Apply `bot-changes-needed` label.
 - Skip all agent review passes.
 
-## Review/Write Output Contract
-
-The providers share the same JSON result shapes.
+## Review Output Contract
 
 Review passes return:
 
@@ -166,16 +149,6 @@ Review passes return:
   "summary": "Overall assessment",
   "new_comments": [],
   "thread_responses": []
-}
-```
-
-Write pass returns:
-
-```json
-{
-  "threads_addressed": [],
-  "build_passed": true,
-  "summary": "What changed"
 }
 ```
 
@@ -201,7 +174,6 @@ Primary labels:
 
 - `bot-review-needed`
 - `bot-changes-needed`
-- `bot-ci-pending`
 - `human-review-needed`
 - `bot-human-intervention`
 
@@ -213,26 +185,24 @@ bot-review-needed
   -> human-review-needed | bot-changes-needed
 
 bot-changes-needed
-  -> write pipeline
-  -> bot-ci-pending | bot-human-intervention
+  -> fix agent addresses comments
+  -> bot-review-needed (loops back)
 
-bot-ci-pending
-  -> CI handler
-  -> bot-review-needed | bot-changes-needed
+After max cycles:
+  -> bot-human-intervention
 ```
 
 ## Design Constraints
 
-- GitHub remains the single source of truth for PR state, labels, comments, and resolved-thread reactions.
+- Local state (`.ironsha/` JSON files) is the source of truth during the review loop.
+- GitHub is only touched at publish time (branch push, PR creation, comment posting).
 - The runner adapter is the only place that should know about CLI flags, MCP wiring, or auth semantics.
 
 ## Contributing — LLM Compatibility Guide
 
-This section describes what a code-submitting LLM must do to participate in the ironsha workflow. Copy this section into any project that will create PRs for ironsha to review.
+This section describes what a code-submitting LLM must do to participate in the ironsha workflow.
 
 ### Supported Platforms
-
-The ironsha supports projects using one of the following stacks, detected by file extensions in the diff:
 
 | Stack | Detected by |
 |---|---|
@@ -243,125 +213,33 @@ The ironsha supports projects using one of the following stacks, detected by fil
 
 ### Required Project Files
 
-Your repository **must** contain:
-
 #### `AGENTS.md`, `CLAUDE.md`, or `README.md`
 Must document the project's **build and test commands**. The ironsha runs these before reviewing. If they fail, the PR is rejected immediately with no code review.
 
-Example:
-```markdown
-## Build
-npm run build
-
-## Test
-npm run test
-
-## Lint
-npm run lint
-```
-
 #### `ARCHITECTURE.md`
-Documents the project's architecture — module structure, data flow, layer boundaries, dependency direction. The ironsha reads this during the architecture review pass and checks that PRs conform to it. If your change introduces new modules or alters the architecture, update this file in the same PR.
-
-### Label-Driven Workflow
-
-The entire review cycle is driven by four GitHub labels. Only one label is active on a PR at a time.
-
-| Label | Applied by | Meaning |
-|---|---|---|
-| `bot-review-needed` | Code submitter / Write bot | PR is ready for review |
-| `bot-changes-needed` | Ironsha | Issues found; write bot picks it up automatically |
-| `human-review-needed` | Ironsha | Bot approved; awaiting human review |
-| `bot-human-intervention` | Write bot | Max review cycles exceeded; needs human help |
-
-#### Lifecycle
-
-The ironsha and write bot form an autonomous loop:
-
-```
-1. Open PR against main
-2. Add label: bot-review-needed
-         │
-         ▼
-   Ironsha picks up the PR
-         │
-    ┌────┴─────────────────────┐
-    │                          │
-    ▼                          ▼
-Build/tests FAIL          Build/tests PASS
-    │                          │
-    │                     Architecture review
-    │                          │
-    │                    ┌─────┴──────┐
-    │                    │            │
-    │                    ▼            ▼
-    │              Arch issues    No arch issues
-    │                    │            │
-    │                    │       Detailed review
-    │                    │            │
-    │                    │      ┌─────┴──────┐
-    │                    │      │            │
-    │                    │      ▼            ▼
-    │                    │  Issues found   No issues
-    │                    │      │            │
-    │                    ▼      ▼            ▼
-    │              bot-changes-needed  human-review-needed
-    │              (REQUEST_CHANGES)
-    │                    │
-    ▼                    ▼
-   Write bot picks up the PR automatically
-         │
-    ┌────┴──────────────────────┐
-    │                           │
-    ▼                           ▼
-Cycle limit reached        Under limit
-    │                           │
-    ▼                      Fix code, build, push
-bot-human-intervention          │
-                                ▼
-                         bot-review-needed (loops back ↑)
-```
-
-The write bot automatically addresses review comments, pushes fixes, and re-triggers review. After `MAX_REVIEW_CYCLES` (default 5) iterations, it applies `bot-human-intervention` and stops.
+Documents the project's architecture. The ironsha reads this during the architecture review pass and checks that PRs conform to it.
 
 ### What the Ironsha Checks
 
-The bot runs up to two sequential review passes. If Pass 1 finds issues, Pass 2 is skipped — there's no point reviewing line-level details when the architecture needs rework. When issues are found, the review is posted with GitHub's "Request changes" status.
+The bot runs up to two sequential review passes. If Pass 1 finds issues, Pass 2 is skipped.
 
 **Pass 1 — Architecture Review**
 - Does the change fit the existing architecture per `ARCHITECTURE.md`?
 - Are new modules/layers in the right place?
 - Is the data flow correct? Any inappropriate coupling?
-- Are dependencies pointing in the right direction?
 - Does `ARCHITECTURE.md` need updating?
 
 **Pass 2 — Detailed Code Review** *(only runs if Pass 1 finds no issues)*
-- Runs the project's linter
 - Correctness: logic errors, null safety, edge cases
 - Performance: unnecessary allocations, N+1 queries
-- Memory management: retain cycles, leaks, uncancelled subscriptions
-- Error handling: missing or inadequate error handling
-- Security: injection, hardcoded secrets, insecure transport
+- Memory management: retain cycles, leaks
+- Error handling
+- Security
 - Testing: are new code paths tested?
 
-### Responding to Review Comments
+### PR Best Practices
 
-When the bot applies `bot-changes-needed`, it will have posted review comments on the PR. Every bot comment (inline review comments and general comments alike) contains a role prefix (`reviewer` or `writer`) and a `thread::{uuid}` tag in its footer for tracking purposes. The submitting LLM **must**:
-
-1. **Address every unresolved comment thread** — the bot tracks both inline review threads and general comment threads via `thread::` tags, and will reject the PR if any are left unaddressed.
-
-2. For each thread, either:
-   - **Fix the issue** in a new commit and reply to the thread explaining the fix, OR
-   - **Justify why no change is needed** by replying to the thread with a clear explanation. The ironsha will evaluate justifications on the next cycle and resolve threads it finds acceptable.
-
-3. **Do not** add rocket/thumbs-up reactions to bot comments — the ironsha uses these reactions to mark threads as resolved.
-
-4. After addressing all threads, **re-apply the `bot-review-needed` label** to trigger another review cycle.
-
-### PR Best Practices for Ironsha Compatibility
-
-- **Keep PRs focused** — one logical change per PR. The bot reviews the full `git diff main...HEAD`.
-- **Update `ARCHITECTURE.md`** if your change introduces new modules, layers, or alters data flow.
-- **Include tests** for new code paths — the bot checks for testing gaps.
-- **Don't rely on formatting fixes** — the bot defers to the project's linter for style and focuses on substantive issues.
-- **Keep build/test commands in `AGENTS.md`, `CLAUDE.md`, or `README.md` up to date** — the bot uses them as-is.
+- **Keep PRs focused** — one logical change per PR.
+- **Update `ARCHITECTURE.md`** if your change introduces new modules or alters data flow.
+- **Include tests** for new code paths.
+- **Keep build/test commands in `AGENTS.md`, `CLAUDE.md`, or `README.md` up to date**.

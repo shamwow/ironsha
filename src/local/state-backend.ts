@@ -55,6 +55,11 @@ export class LocalStateBackend implements StateBackend {
     return this.state.label;
   }
 
+  async setDescription(description: string): Promise<void> {
+    this.state.description = description;
+    await this.persist();
+  }
+
   private async persist(): Promise<void> {
     this.state.updatedAt = new Date().toISOString();
     const dir = dirname(this.statePath);
@@ -203,9 +208,9 @@ export class LocalStateBackend implements StateBackend {
   async formatThreadStateForAgent(_pr: PRInfo): Promise<string> {
     const lines: string[] = [];
 
+    const resolved = await this.fetchResolvedThreadIds(_pr);
     for (const review of this.state.reviews) {
       for (const comment of review.comments) {
-        const resolved = await this.fetchResolvedThreadIds(_pr);
         const status = resolved.has(comment.id) ? "RESOLVED" : "UNRESOLVED";
         lines.push(
           `### Thread ${comment.id} (${status}) — inline on ${comment.path}:${comment.line}`,
