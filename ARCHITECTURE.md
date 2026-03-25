@@ -66,8 +66,9 @@ The CLI (`npm run state`) manages all local PR state:
 - `init` — create state file for current branch
 - `review post --json <json>` — store review with inline comments
 - `resolve <comment-id>` — mark thread as resolved (rocket + thumbs-up reactions)
+- `reply <comment-id> --body <text>` — post a reply to a review comment thread
 - `threads` — format thread state for the agent
-- `publish` — push branch, create GitHub PR, post all review history
+- `publish` — push branch, create GitHub PR, post all review history, add footer tags, and sync resolved reactions
 
 State is stored in `.ironsha/{owner}-{repo}-{branch}.json`.
 
