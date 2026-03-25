@@ -279,10 +279,10 @@ async function publishToGitHub(
         }
       }
     } else if (review.body) {
-      // Summary-only review
+      // Summary-only review (preserves APPROVE/COMMENT/REQUEST_CHANGES from local state)
       const payload = JSON.stringify({
         body: review.body + makeFooter(review.id, review.id, "reviewer"),
-        event: "COMMENT",
+        event: review.event,
         comments: [],
       });
       execSync(
@@ -533,25 +533,26 @@ async function main(): Promise<void> {
 
         // Determine event: if explicit, use it; otherwise infer from comments + unresolved state
         let event = data.event;
+        let unresolvedCount: number | undefined;
         if (!event) {
           if (comments.length > 0) {
             event = "REQUEST_CHANGES";
           } else {
-            const unresolved = await backend.fetchUnresolvedThreadCount(pr);
-            event = unresolved > 0 ? "COMMENT" : "APPROVE";
+            unresolvedCount = await backend.fetchUnresolvedThreadCount(pr);
+            event = unresolvedCount > 0 ? "COMMENT" : "APPROVE";
           }
         }
         await backend.postReview(pr, comments, data.summary ?? "", event);
 
-        // Set label based on outcome
+        // Set label based on outcome (reuse cached unresolved count)
         if (comments.length > 0) {
           await backend.setLabel(pr, "bot-changes-needed");
           console.log(`Posted review with ${comments.length} comment(s). Label: bot-changes-needed`);
         } else {
-          const unresolved = await backend.fetchUnresolvedThreadCount(pr);
-          if (unresolved > 0) {
+          unresolvedCount ??= await backend.fetchUnresolvedThreadCount(pr);
+          if (unresolvedCount > 0) {
             await backend.setLabel(pr, "bot-changes-needed");
-            console.log(`Posted clean review but ${unresolved} unresolved thread(s) remain. Label: bot-changes-needed`);
+            console.log(`Posted clean review but ${unresolvedCount} unresolved thread(s) remain. Label: bot-changes-needed`);
           } else {
             await backend.setLabel(pr, "human-review-needed");
             console.log(`Approved. Label: human-review-needed`);

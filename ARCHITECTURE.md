@@ -182,7 +182,7 @@ Lifecycle:
 
 ```text
 bot-review-needed
-  -> review pipeline (posts with REQUEST_CHANGES event when issues are found)
+  -> review pipeline (REQUEST_CHANGES when issues found, APPROVE when clean)
   -> human-review-needed | bot-changes-needed
 
 bot-changes-needed
