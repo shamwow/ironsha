@@ -322,7 +322,7 @@ async function publishToGitHub(
         if (match) {
           try {
             execSync(
-              `gh api repos/${pr.owner}/${pr.repo}/pulls/comments/${match.id}/replies --input -`,
+              `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/comments/${match.id}/replies --input -`,
               { cwd: checkoutPath, input: JSON.stringify({ body: replyBody }), stdio: ["pipe", "pipe", "pipe"], ...devEnv },
             );
             continue;
