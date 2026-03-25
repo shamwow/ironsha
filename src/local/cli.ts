@@ -188,6 +188,14 @@ async function publishToGitHub(
       { cwd: checkoutPath, encoding: "utf-8" },
     ).trim();
     console.log(`Found existing PR #${prNumber}: ${prUrl}`);
+
+    // Update description if set
+    if (state.description) {
+      execFileSync(
+        "gh", ["pr", "edit", String(prNumber), "--body", state.description],
+        { cwd: checkoutPath, stdio: "pipe" },
+      );
+    }
   } catch {
     // No existing PR — create one
     const title = state.pr.title || `${pr.branch}`;
@@ -201,18 +209,6 @@ async function publishToGitHub(
     const numMatch = prUrl.match(/\/pull\/(\d+)/);
     prNumber = numMatch ? parseInt(numMatch[1], 10) : 0;
     console.log(`Created PR #${prNumber}: ${prUrl}`);
-  }
-
-  // Update description if set (separate from find/create to avoid masking errors)
-  if (state.description) {
-    try {
-      execFileSync(
-        "gh", ["pr", "edit", String(prNumber), "--body", state.description],
-        { cwd: checkoutPath, stdio: "pipe" },
-      );
-    } catch {
-      console.error("  Could not update PR description.");
-    }
   }
 
   // 3. Post all reviews with inline comments
