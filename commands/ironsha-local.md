@@ -117,8 +117,9 @@ Spawn a **fix subagent** with instructions that include:
 
 After the fix subagent completes:
 
-1. For each thread it addressed, resolve it:
+1. For each thread it addressed, first post the fix explanation as a reply, then resolve it:
    ```bash
+   npm run state -- reply <comment-id> --body "<explanation from threads_addressed>"
    npm run state -- resolve <comment-id>
    ```
 
