@@ -237,3 +237,209 @@
 {"level":30,"time":1774399862405,"pid":7951,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#100","msg":"Architecture pass found issues, skipping detailed review"}
 {"level":30,"time":1774399862974,"pid":7951,"hostname":"Ironshas-Mini.lan","msg":"Cannot REQUEST_CHANGES on own PR, falling back to COMMENT"}
 {"level":30,"time":1774399863871,"pid":7951,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#100","msg":"Review has unresolved items, requesting changes"}
+{"level":30,"time":1774403651146,"pid":24389,"hostname":"Ironshas-Mini.lan","path":"src/foo.ts","originalLine":16,"snappedLine":14,"msg":"Snapped comment to nearest diff line"}
+{"level":30,"time":1774403651146,"pid":24389,"hostname":"Ironshas-Mini.lan","path":"src/foo.ts","line":100,"msg":"Comment line not in diff, converting to general comment"}
+{"level":30,"time":1774403651146,"pid":24389,"hostname":"Ironshas-Mini.lan","path":"src/unknown.ts","line":5,"msg":"Comment file not in diff, converting to general comment"}
+{"level":30,"time":1774403651146,"pid":24389,"hostname":"Ironshas-Mini.lan","path":"src/foo.ts","line":50,"msg":"Comment line not in diff, converting to general comment"}
+{"level":30,"time":1774403651146,"pid":24389,"hostname":"Ironshas-Mini.lan","path":"nope.ts","line":1,"msg":"Comment file not in diff, converting to general comment"}
+{"level":30,"time":1774403654950,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#101","msg":"Cloning PR branch"}
+{"level":30,"time":1774403655540,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#101","checkoutPath":"/tmp/ironsha-integration-test/review-shamwow-ironsha-ios-test-fixture-101-1774403654951","msg":"Cloned successfully"}
+{"level":30,"time":1774403655540,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#101","msg":"Running build and tests"}
+{"level":30,"time":1774403655542,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#101","msg":"Build and tests passed"}
+{"level":30,"time":1774403655703,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#101","platform":"ios","msg":"Detected platform"}
+{"level":30,"time":1774403656041,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#101","reviewId":"325b951c-633d-46cd-9a4c-3076dd036a5c","msg":"Generated review ID"}
+{"level":30,"time":1774403656041,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#101","msg":"Running architecture review pass"}
+{"level":30,"time":1774403666496,"pid":24392,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#102","title":"[ironsha-t-05f56536eabb] Fix date picker layout jump and dynamic header spacing","label":"bot-review-needed","msg":"Starting pipeline"}
+{"level":30,"time":1774403669253,"pid":24392,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#106","msg":"Cloning PR branch"}
+{"level":30,"time":1774403669843,"pid":24392,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#106","checkoutPath":"/tmp/ironsha-integration-test/review-shamwow-ironsha-ios-test-fixture-106-1774403669253","msg":"Cloned successfully"}
+{"level":30,"time":1774403669843,"pid":24392,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#106","msg":"Running build and tests"}
+{"level":30,"time":1774403669845,"pid":24392,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#106","msg":"Build and tests passed"}
+{"level":30,"time":1774403670071,"pid":24392,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#106","platform":"ios","msg":"Detected platform"}
+{"level":30,"time":1774403670432,"pid":24392,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#106","reviewId":"d0e2406e-3813-45c7-81e0-339954e11ec4","msg":"Generated review ID"}
+{"level":30,"time":1774403670433,"pid":24392,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#106","msg":"Running architecture review pass"}
+{"level":30,"time":1774403714842,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#101","comments":0,"threads":0,"reviewId":"325b951c-633d-46cd-9a4c-3076dd036a5c","msg":"Architecture pass complete"}
+{"level":30,"time":1774403714842,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#101","msg":"Running detailed review pass"}
+{"level":30,"time":1774403757805,"pid":24392,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#106","comments":3,"threads":0,"reviewId":"d0e2406e-3813-45c7-81e0-339954e11ec4","msg":"Architecture pass complete"}
+{"level":30,"time":1774403757805,"pid":24392,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#106","msg":"Architecture pass found issues, skipping detailed review"}
+{"level":30,"time":1774403758414,"pid":24392,"hostname":"Ironshas-Mini.lan","msg":"Cannot REQUEST_CHANGES on own PR, falling back to COMMENT"}
+{"level":30,"time":1774403759673,"pid":24392,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#106","msg":"Review has unresolved items, requesting changes"}
+{"level":30,"time":1774403764056,"pid":24392,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#107","msg":"Cloning PR branch"}
+{"level":30,"time":1774403764568,"pid":24392,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#107","checkoutPath":"/tmp/ironsha-integration-test/review-shamwow-ironsha-ios-test-fixture-107-1774403764056","msg":"Cloned successfully"}
+{"level":30,"time":1774403764568,"pid":24392,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#107","msg":"Running build and tests"}
+{"level":30,"time":1774403764569,"pid":24392,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#107","msg":"Build and tests passed"}
+{"level":30,"time":1774403764821,"pid":24392,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#107","platform":"ios","msg":"Detected platform"}
+{"level":30,"time":1774403765232,"pid":24392,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#107","reviewId":"a6859033-5818-474c-9f5e-a6d743ceb2d4","msg":"Generated review ID"}
+{"level":30,"time":1774403765232,"pid":24392,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#107","msg":"Running architecture review pass"}
+{"level":30,"time":1774403801792,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#101","comments":4,"threads":0,"reviewId":"325b951c-633d-46cd-9a4c-3076dd036a5c","msg":"Detailed pass complete"}
+{"level":30,"time":1774403802480,"pid":24393,"hostname":"Ironshas-Mini.lan","msg":"Cannot REQUEST_CHANGES on own PR, falling back to COMMENT"}
+{"level":30,"time":1774403804326,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#101","msg":"Review has unresolved items, requesting changes"}
+{"level":30,"time":1774403814138,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","msg":"Cloning PR branch"}
+{"level":30,"time":1774403814734,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","checkoutPath":"/tmp/ironsha-integration-test/review-shamwow-ironsha-ios-test-fixture-110-1774403814138","msg":"Cloned successfully"}
+{"level":30,"time":1774403814734,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","msg":"Running build and tests"}
+{"level":30,"time":1774403814735,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","msg":"Build and tests passed"}
+{"level":30,"time":1774403814919,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","platform":"ios","msg":"Detected platform"}
+{"level":30,"time":1774403815212,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","reviewId":"ef099b66-ff33-4902-9eca-855886963fe2","msg":"Generated review ID"}
+{"level":30,"time":1774403815212,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","msg":"Running architecture review pass"}
+{"level":30,"time":1774403873222,"pid":24392,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#107","comments":0,"threads":0,"reviewId":"a6859033-5818-474c-9f5e-a6d743ceb2d4","msg":"Architecture pass complete"}
+{"level":30,"time":1774403873222,"pid":24392,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#107","msg":"Running detailed review pass"}
+{"level":30,"time":1774403890232,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","comments":0,"threads":0,"reviewId":"ef099b66-ff33-4902-9eca-855886963fe2","msg":"Architecture pass complete"}
+{"level":30,"time":1774403890232,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","msg":"Running detailed review pass"}
+{"level":30,"time":1774403953277,"pid":32202,"hostname":"Ironshas-Mini.lan","path":"src/foo.ts","originalLine":16,"snappedLine":14,"msg":"Snapped comment to nearest diff line"}
+{"level":30,"time":1774403953277,"pid":32202,"hostname":"Ironshas-Mini.lan","path":"src/foo.ts","line":100,"msg":"Comment line not in diff, converting to general comment"}
+{"level":30,"time":1774403953277,"pid":32202,"hostname":"Ironshas-Mini.lan","path":"src/unknown.ts","line":5,"msg":"Comment file not in diff, converting to general comment"}
+{"level":30,"time":1774403953277,"pid":32202,"hostname":"Ironshas-Mini.lan","path":"src/foo.ts","line":50,"msg":"Comment line not in diff, converting to general comment"}
+{"level":30,"time":1774403953277,"pid":32202,"hostname":"Ironshas-Mini.lan","path":"nope.ts","line":1,"msg":"Comment file not in diff, converting to general comment"}
+{"level":30,"time":1774403956925,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","comments":3,"threads":0,"reviewId":"ef099b66-ff33-4902-9eca-855886963fe2","msg":"Detailed pass complete"}
+{"level":30,"time":1774403956925,"pid":24393,"hostname":"Ironshas-Mini.lan","path":"Zenith/Views/Dashboard/DashboardView.swift","line":90,"msg":"Comment line not in diff, converting to general comment"}
+{"level":30,"time":1774403956925,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","adjustedCount":1,"msg":"Adjusted comments with invalid diff lines"}
+{"level":30,"time":1774403957529,"pid":24393,"hostname":"Ironshas-Mini.lan","msg":"Cannot REQUEST_CHANGES on own PR, falling back to COMMENT"}
+{"level":30,"time":1774403958943,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","msg":"Review has unresolved items, requesting changes"}
+{"level":30,"time":1774403959986,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","msg":"Cloning PR branch"}
+{"level":30,"time":1774403960441,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","checkoutPath":"/tmp/ironsha-integration-test/review-shamwow-ironsha-ios-test-fixture-110-1774403959986","msg":"Cloned successfully"}
+{"level":30,"time":1774403960441,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","msg":"Running build and tests"}
+{"level":30,"time":1774403960441,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","msg":"Build and tests passed"}
+{"level":30,"time":1774403960608,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","platform":"ios","msg":"Detected platform"}
+{"level":30,"time":1774403961307,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","reviewId":"a0fa4a31-0c04-46cb-b545-e330943cad86","msg":"Generated review ID"}
+{"level":30,"time":1774403961307,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","msg":"Running architecture review pass"}
+{"level":30,"time":1774403961308,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","comments":0,"threads":0,"reviewId":"a0fa4a31-0c04-46cb-b545-e330943cad86","msg":"Architecture pass complete"}
+{"level":30,"time":1774403961308,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","msg":"Running detailed review pass"}
+{"level":30,"time":1774403961308,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","comments":0,"threads":0,"reviewId":"a0fa4a31-0c04-46cb-b545-e330943cad86","msg":"Detailed pass complete"}
+{"level":40,"time":1774403961973,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","unresolvedOnPR":3,"msg":"Agent returned no unresolved threads but PR still has unresolved bot comments — blocking LGTM"}
+{"level":30,"time":1774403961974,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#110","msg":"Review has unresolved items, requesting changes"}
+{"level":30,"time":1774403964546,"pid":24392,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#107","comments":0,"threads":0,"reviewId":"a6859033-5818-474c-9f5e-a6d743ceb2d4","msg":"Detailed pass complete"}
+{"level":30,"time":1774403964968,"pid":24392,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#107","msg":"Review passed, marking for human review"}
+{"level":30,"time":1774403966801,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#111","msg":"Cloning PR branch"}
+{"level":30,"time":1774403967355,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#111","checkoutPath":"/tmp/ironsha-integration-test/review-shamwow-ironsha-ios-test-fixture-111-1774403966801","msg":"Cloned successfully"}
+{"level":30,"time":1774403967355,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#111","msg":"Running build and tests"}
+{"level":30,"time":1774403967356,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#111","msg":"Build and tests passed"}
+{"level":30,"time":1774403967532,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#111","platform":"ios","msg":"Detected platform"}
+{"level":30,"time":1774403967897,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#111","reviewId":"2d431264-940c-4005-a0d6-c487b441ce01","msg":"Generated review ID"}
+{"level":30,"time":1774403967897,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#111","msg":"Running architecture review pass"}
+{"level":30,"time":1774404047036,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#112","msg":"Cloning PR branch"}
+{"level":30,"time":1774404047583,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#112","checkoutPath":"/tmp/ironsha-integration-test/review-shamwow-ironsha-ios-test-fixture-112-1774404047036","msg":"Cloned successfully"}
+{"level":30,"time":1774404047584,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#112","msg":"Running build and tests"}
+{"level":30,"time":1774404047585,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#112","msg":"Build and tests passed"}
+{"level":30,"time":1774404047759,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#112","platform":"ios","msg":"Detected platform"}
+{"level":30,"time":1774404048214,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#112","reviewId":"f416b110-1856-4330-9353-dcc52e1df18f","msg":"Generated review ID"}
+{"level":30,"time":1774404048214,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#112","msg":"Running architecture review pass"}
+{"level":30,"time":1774404048214,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#112","comments":1,"threads":0,"reviewId":"f416b110-1856-4330-9353-dcc52e1df18f","msg":"Architecture pass complete"}
+{"level":30,"time":1774404048214,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#112","msg":"Architecture pass found issues, skipping detailed review"}
+{"level":30,"time":1774404048818,"pid":33410,"hostname":"Ironshas-Mini.lan","msg":"Cannot REQUEST_CHANGES on own PR, falling back to COMMENT"}
+{"level":30,"time":1774404048311,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#111","comments":3,"threads":0,"reviewId":"2d431264-940c-4005-a0d6-c487b441ce01","msg":"Architecture pass complete"}
+{"level":30,"time":1774404048311,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#111","msg":"Architecture pass found issues, skipping detailed review"}
+{"level":30,"time":1774404048986,"pid":24393,"hostname":"Ironshas-Mini.lan","msg":"Cannot REQUEST_CHANGES on own PR, falling back to COMMENT"}
+{"level":30,"time":1774404049447,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#112","msg":"Review has unresolved items, requesting changes"}
+{"level":30,"time":1774404050345,"pid":24393,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#111","msg":"Review has unresolved items, requesting changes"}
+{"level":30,"time":1774404061079,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#115","msg":"Cloning PR branch"}
+{"level":30,"time":1774404061818,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#115","checkoutPath":"/tmp/ironsha-integration-test/review-shamwow-ironsha-ios-test-fixture-115-1774404061079","msg":"Cloned successfully"}
+{"level":30,"time":1774404061818,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#115","msg":"Running build and tests"}
+{"level":30,"time":1774404061819,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#115","msg":"Build and tests passed"}
+{"level":30,"time":1774404062005,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#115","platform":"ios","msg":"Detected platform"}
+{"level":30,"time":1774404062409,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#115","reviewId":"c2fd93a5-5651-42d4-8909-0c27bf79e226","msg":"Generated review ID"}
+{"level":30,"time":1774404062409,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#115","msg":"Running architecture review pass"}
+{"level":30,"time":1774404062409,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#115","comments":1,"threads":0,"reviewId":"c2fd93a5-5651-42d4-8909-0c27bf79e226","msg":"Architecture pass complete"}
+{"level":30,"time":1774404062409,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#115","msg":"Architecture pass found issues, skipping detailed review"}
+{"level":30,"time":1774404062960,"pid":33410,"hostname":"Ironshas-Mini.lan","msg":"Cannot REQUEST_CHANGES on own PR, falling back to COMMENT"}
+{"level":30,"time":1774404063672,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#115","msg":"Review has unresolved items, requesting changes"}
+{"level":30,"time":1774404064793,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#115","msg":"Cloning PR branch"}
+{"level":30,"time":1774404065415,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#115","checkoutPath":"/tmp/ironsha-integration-test/review-shamwow-ironsha-ios-test-fixture-115-1774404064793","msg":"Cloned successfully"}
+{"level":30,"time":1774404065415,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#115","msg":"Running build and tests"}
+{"level":30,"time":1774404065416,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#115","msg":"Build and tests passed"}
+{"level":30,"time":1774404065737,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#115","platform":"ios","msg":"Detected platform"}
+{"level":30,"time":1774404066302,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#115","reviewId":"68f1d2ea-bd12-4fff-8689-01a9d28b7e56","msg":"Generated review ID"}
+{"level":30,"time":1774404066302,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#115","msg":"Running architecture review pass"}
+{"level":30,"time":1774404066303,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#115","comments":0,"threads":0,"reviewId":"68f1d2ea-bd12-4fff-8689-01a9d28b7e56","msg":"Architecture pass complete"}
+{"level":30,"time":1774404066303,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#115","msg":"Running detailed review pass"}
+{"level":30,"time":1774404066303,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#115","comments":0,"threads":0,"reviewId":"68f1d2ea-bd12-4fff-8689-01a9d28b7e56","msg":"Detailed pass complete"}
+{"level":40,"time":1774404066753,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#115","unresolvedOnPR":1,"msg":"Agent returned no unresolved threads but PR still has unresolved bot comments — blocking LGTM"}
+{"level":30,"time":1774404066753,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#115","msg":"Review has unresolved items, requesting changes"}
+{"level":30,"time":1774404071299,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#116","msg":"Cloning PR branch"}
+{"level":30,"time":1774404071953,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#116","checkoutPath":"/tmp/ironsha-integration-test/review-shamwow-ironsha-ios-test-fixture-116-1774404071299","msg":"Cloned successfully"}
+{"level":30,"time":1774404071953,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#116","msg":"Running build and tests"}
+{"level":30,"time":1774404071954,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#116","msg":"Build and tests passed"}
+{"level":30,"time":1774404072164,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#116","platform":"ios","msg":"Detected platform"}
+{"level":30,"time":1774404072579,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#116","reviewId":"7dd8f74b-056a-4894-ae91-b2c4eb21f075","msg":"Generated review ID"}
+{"level":30,"time":1774404072579,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#116","msg":"Running architecture review pass"}
+{"level":30,"time":1774404072579,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#116","comments":1,"threads":0,"reviewId":"7dd8f74b-056a-4894-ae91-b2c4eb21f075","msg":"Architecture pass complete"}
+{"level":30,"time":1774404072579,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#116","msg":"Architecture pass found issues, skipping detailed review"}
+{"level":30,"time":1774404073094,"pid":33410,"hostname":"Ironshas-Mini.lan","msg":"Cannot REQUEST_CHANGES on own PR, falling back to COMMENT"}
+{"level":30,"time":1774404073776,"pid":33410,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#116","msg":"Review has unresolved items, requesting changes"}
+{"level":30,"time":1774404435415,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#117","msg":"Cloning PR branch"}
+{"level":30,"time":1774404436068,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#117","checkoutPath":"/tmp/ironsha-integration-test/review-shamwow-ironsha-ios-test-fixture-117-1774404435416","msg":"Cloned successfully"}
+{"level":30,"time":1774404436069,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#117","msg":"Running build and tests"}
+{"level":30,"time":1774404436070,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#117","msg":"Build and tests passed"}
+{"level":30,"time":1774404436334,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#117","platform":"ios","msg":"Detected platform"}
+{"level":30,"time":1774404436882,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#117","reviewId":"ecb60f5d-f669-419a-a730-4b02381016eb","msg":"Generated review ID"}
+{"level":30,"time":1774404436882,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#117","msg":"Running architecture review pass"}
+{"level":30,"time":1774404436882,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#117","comments":1,"threads":0,"reviewId":"ecb60f5d-f669-419a-a730-4b02381016eb","msg":"Architecture pass complete"}
+{"level":30,"time":1774404436882,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#117","msg":"Architecture pass found issues, skipping detailed review"}
+{"level":30,"time":1774404437381,"pid":33681,"hostname":"Ironshas-Mini.lan","msg":"Cannot REQUEST_CHANGES on own PR, falling back to COMMENT"}
+{"level":30,"time":1774404438096,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#117","msg":"Review has unresolved items, requesting changes"}
+{"level":30,"time":1774404448918,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#120","msg":"Cloning PR branch"}
+{"level":30,"time":1774404449571,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#120","checkoutPath":"/tmp/ironsha-integration-test/review-shamwow-ironsha-ios-test-fixture-120-1774404448918","msg":"Cloned successfully"}
+{"level":30,"time":1774404449572,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#120","msg":"Running build and tests"}
+{"level":30,"time":1774404449572,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#120","msg":"Build and tests passed"}
+{"level":30,"time":1774404449754,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#120","platform":"ios","msg":"Detected platform"}
+{"level":30,"time":1774404450160,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#120","reviewId":"c61452c8-7c8d-4dc8-bbd5-0227546f2c0f","msg":"Generated review ID"}
+{"level":30,"time":1774404450160,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#120","msg":"Running architecture review pass"}
+{"level":30,"time":1774404450160,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#120","comments":1,"threads":0,"reviewId":"c61452c8-7c8d-4dc8-bbd5-0227546f2c0f","msg":"Architecture pass complete"}
+{"level":30,"time":1774404450160,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#120","msg":"Architecture pass found issues, skipping detailed review"}
+{"level":30,"time":1774404450551,"pid":33681,"hostname":"Ironshas-Mini.lan","msg":"Cannot REQUEST_CHANGES on own PR, falling back to COMMENT"}
+{"level":30,"time":1774404451252,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#120","msg":"Review has unresolved items, requesting changes"}
+{"level":30,"time":1774404452166,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#120","msg":"Cloning PR branch"}
+{"level":30,"time":1774404452792,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#120","checkoutPath":"/tmp/ironsha-integration-test/review-shamwow-ironsha-ios-test-fixture-120-1774404452166","msg":"Cloned successfully"}
+{"level":30,"time":1774404452792,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#120","msg":"Running build and tests"}
+{"level":30,"time":1774404452793,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#120","msg":"Build and tests passed"}
+{"level":30,"time":1774404452920,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#120","platform":"ios","msg":"Detected platform"}
+{"level":30,"time":1774404453535,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#120","reviewId":"5639a961-9b3e-470c-96ec-8f12fc2fedc3","msg":"Generated review ID"}
+{"level":30,"time":1774404453535,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#120","msg":"Running architecture review pass"}
+{"level":30,"time":1774404453535,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#120","comments":0,"threads":0,"reviewId":"5639a961-9b3e-470c-96ec-8f12fc2fedc3","msg":"Architecture pass complete"}
+{"level":30,"time":1774404453535,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#120","msg":"Running detailed review pass"}
+{"level":30,"time":1774404453536,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#120","comments":0,"threads":0,"reviewId":"5639a961-9b3e-470c-96ec-8f12fc2fedc3","msg":"Detailed pass complete"}
+{"level":40,"time":1774404453953,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#120","unresolvedOnPR":1,"msg":"Agent returned no unresolved threads but PR still has unresolved bot comments — blocking LGTM"}
+{"level":30,"time":1774404453953,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#120","msg":"Review has unresolved items, requesting changes"}
+{"level":30,"time":1774404458357,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#121","msg":"Cloning PR branch"}
+{"level":30,"time":1774404459033,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#121","checkoutPath":"/tmp/ironsha-integration-test/review-shamwow-ironsha-ios-test-fixture-121-1774404458357","msg":"Cloned successfully"}
+{"level":30,"time":1774404459033,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#121","msg":"Running build and tests"}
+{"level":30,"time":1774404459033,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#121","msg":"Build and tests passed"}
+{"level":30,"time":1774404459229,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#121","platform":"ios","msg":"Detected platform"}
+{"level":30,"time":1774404459600,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#121","reviewId":"6dc03f85-c4b0-436d-a8f8-6f9a3e203445","msg":"Generated review ID"}
+{"level":30,"time":1774404459600,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#121","msg":"Running architecture review pass"}
+{"level":30,"time":1774404459600,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#121","comments":1,"threads":0,"reviewId":"6dc03f85-c4b0-436d-a8f8-6f9a3e203445","msg":"Architecture pass complete"}
+{"level":30,"time":1774404459600,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#121","msg":"Architecture pass found issues, skipping detailed review"}
+{"level":30,"time":1774404460046,"pid":33681,"hostname":"Ironshas-Mini.lan","msg":"Cannot REQUEST_CHANGES on own PR, falling back to COMMENT"}
+{"level":30,"time":1774404460624,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"shamwow/ironsha-ios-test-fixture#121","msg":"Review has unresolved items, requesting changes"}
+{"level":30,"time":1774404466778,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","msg":"Running build and tests"}
+{"level":30,"time":1774404466778,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","msg":"Build and tests passed"}
+{"level":30,"time":1774404466785,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","platform":"ios","msg":"Detected platform"}
+{"level":30,"time":1774404466786,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","reviewId":"55fabc31-8ea3-48af-bc16-f002d57d8171","msg":"Generated review ID"}
+{"level":30,"time":1774404466786,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","msg":"Running architecture review pass"}
+{"level":30,"time":1774404466786,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","comments":1,"threads":0,"reviewId":"55fabc31-8ea3-48af-bc16-f002d57d8171","msg":"Architecture pass complete"}
+{"level":30,"time":1774404466786,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","msg":"Architecture pass found issues, skipping detailed review"}
+{"level":30,"time":1774404466786,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","msg":"Review has unresolved items, requesting changes"}
+{"level":30,"time":1774404466912,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","msg":"Running build and tests"}
+{"level":30,"time":1774404466913,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","msg":"Build and tests passed"}
+{"level":30,"time":1774404466920,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","platform":"ios","msg":"Detected platform"}
+{"level":30,"time":1774404466920,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","reviewId":"d7fedd7a-a064-49f7-9e1f-25b23719993b","msg":"Generated review ID"}
+{"level":30,"time":1774404466920,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","msg":"Running architecture review pass"}
+{"level":30,"time":1774404466920,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","comments":1,"threads":0,"reviewId":"d7fedd7a-a064-49f7-9e1f-25b23719993b","msg":"Architecture pass complete"}
+{"level":30,"time":1774404466920,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","msg":"Architecture pass found issues, skipping detailed review"}
+{"level":30,"time":1774404466921,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","msg":"Review has unresolved items, requesting changes"}
+{"level":30,"time":1774404466921,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","msg":"Running build and tests"}
+{"level":30,"time":1774404466921,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","msg":"Build and tests passed"}
+{"level":30,"time":1774404466928,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","platform":"ios","msg":"Detected platform"}
+{"level":30,"time":1774404466928,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","reviewId":"3f6b07d2-9bac-41bf-9182-e8efeaf43875","msg":"Generated review ID"}
+{"level":30,"time":1774404466928,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","msg":"Running architecture review pass"}
+{"level":30,"time":1774404466928,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","comments":0,"threads":0,"reviewId":"3f6b07d2-9bac-41bf-9182-e8efeaf43875","msg":"Architecture pass complete"}
+{"level":30,"time":1774404466928,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","msg":"Running detailed review pass"}
+{"level":30,"time":1774404466928,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","comments":0,"threads":0,"reviewId":"3f6b07d2-9bac-41bf-9182-e8efeaf43875","msg":"Detailed pass complete"}
+{"level":40,"time":1774404466928,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","unresolvedOnPR":1,"msg":"Agent returned no unresolved threads but PR still has unresolved bot comments — blocking LGTM"}
+{"level":30,"time":1774404466928,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","msg":"Review has unresolved items, requesting changes"}
+{"level":30,"time":1774404467055,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","msg":"Running build and tests"}
+{"level":30,"time":1774404467056,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","msg":"Build and tests passed"}
+{"level":30,"time":1774404467063,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","platform":"ios","msg":"Detected platform"}
+{"level":30,"time":1774404467063,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","reviewId":"c887227a-eab6-4005-913b-cdde93795ac4","msg":"Generated review ID"}
+{"level":30,"time":1774404467063,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","msg":"Running architecture review pass"}
+{"level":30,"time":1774404467063,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","comments":1,"threads":0,"reviewId":"c887227a-eab6-4005-913b-cdde93795ac4","msg":"Architecture pass complete"}
+{"level":30,"time":1774404467063,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","msg":"Architecture pass found issues, skipping detailed review"}
+{"level":30,"time":1774404467063,"pid":33681,"hostname":"Ironshas-Mini.lan","pr":"local/test#0","msg":"Review has unresolved items, requesting changes"}
