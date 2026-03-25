@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { LocalStateBackend } from "./state-backend.js";
 import { makeFooter } from "../shared/footer.js";
+import { buildDiffableLines } from "../github/diff-lines.js";
+import { validateComments } from "../github/comment-validator.js";
 import { config } from "../config.js";
 import type { PRInfo } from "../review/types.js";
 import type { BotLabel } from "./types.js";
@@ -215,17 +217,41 @@ async function publishToGitHub(
     console.log(`Created PR #${prNumber}: ${prUrl}`);
   }
 
-  // 3. Post all reviews with inline comments
+  // 3. Fetch PR diff for comment validation
+  let diffableLines = new Map<string, Set<number>>();
+  try {
+    const filesJson = execSync(
+      `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/files --paginate`,
+      { cwd: checkoutPath, encoding: "utf-8", ...devEnv },
+    );
+    const raw = filesJson.trim();
+    const files: Array<{ filename: string; patch?: string }> = JSON.parse(
+      raw.replace(/\]\s*\[/g, ","),
+    );
+    diffableLines = buildDiffableLines(files);
+  } catch {
+    console.error("  Could not fetch PR files for comment validation.");
+  }
+
+  // 4. Post all reviews with inline comments
   for (const review of state.reviews) {
     console.log(`Posting review ${review.id.slice(0, 8)} (${review.event})...`);
 
     if (review.comments.length > 0) {
-      // Build the review payload with footers
-      const comments = review.comments.map((c) => ({
-        path: c.path,
-        line: c.line,
+      // Build the review payload with footers, validating against diff
+      const rawComments = review.comments.map((c) => ({
+        path: c.path as string | null,
+        line: c.line as number | null,
         body: c.body + makeFooter(c.id, review.id, "reviewer"),
       }));
+      const { comments: validatedComments, adjustedCount } = validateComments(rawComments, diffableLines);
+      if (adjustedCount > 0) {
+        console.log(`  Adjusted ${adjustedCount} comment(s) with invalid diff lines`);
+      }
+      // Separate inline and general comments
+      const inlineComments = validatedComments.filter((c) => c.path !== null && c.line !== null);
+      const generalComments = validatedComments.filter((c) => c.path === null || c.line === null);
+      const comments = inlineComments.map((c) => ({ path: c.path!, line: c.line!, body: c.body }));
       const summaryBody = review.body
         ? review.body + makeFooter(review.id, review.id, "reviewer")
         : "";
@@ -278,6 +304,21 @@ async function publishToGitHub(
           }
         }
       }
+
+      // Post general comments (converted from invalid inline positions by the validator)
+      for (const gc of generalComments) {
+        const gcPayload = JSON.stringify({
+          body: gc.body,
+          event: "COMMENT",
+          comments: [],
+        });
+        try {
+          execSync(
+            `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/reviews --input -`,
+            { cwd: checkoutPath, input: gcPayload, stdio: ["pipe", "pipe", "pipe"], ...botEnv },
+          );
+        } catch { /* skip */ }
+      }
     } else if (review.body) {
       // Summary-only review (preserves APPROVE/COMMENT/REQUEST_CHANGES from local state)
       const payload = JSON.stringify({
@@ -293,7 +334,7 @@ async function publishToGitHub(
 
   }
 
-  // 4. Fetch all GitHub PR review comments for matching local → GitHub IDs.
+  // 5. Fetch all GitHub PR review comments for matching local → GitHub IDs.
   // Used for both inline replies and resolved reactions.
   let ghComments: Array<{ id: number; path: string; line: number | null; body: string }> = [];
   try {
@@ -308,7 +349,7 @@ async function publishToGitHub(
     console.error("  Could not fetch PR comments for thread matching.");
   }
 
-  // 5. Post inline thread replies as the developer (writer role)
+  // 6. Post inline thread replies as the developer (writer role)
   for (const review of state.reviews) {
     for (const comment of review.comments) {
       for (const reply of comment.replies) {
@@ -339,7 +380,7 @@ async function publishToGitHub(
     }
   }
 
-  // 6. Post resolved reactions
+  // 7. Post resolved reactions
   const resolvedIds = await backend.fetchResolvedThreadIds(pr);
   if (resolvedIds.size > 0) {
     console.log(`Posting reactions for ${resolvedIds.size} resolved comment(s)...`);
@@ -373,7 +414,7 @@ async function publishToGitHub(
     }
   }
 
-  // 5. Set label
+  // 8. Set label
   console.log(`Setting label: ${state.label}`);
   const botLabels = [
     "bot-review-needed", "bot-changes-needed",
