@@ -1,11 +1,10 @@
+import "dotenv/config";
 import { randomBytes } from "node:crypto";
-import { execFileSync, execSync } from "node:child_process";
+import { execFileSync, execSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
-  readdirSync,
   mkdtempSync,
   mkdirSync,
-  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -18,11 +17,33 @@ interface IntegrationFixture {
   rootDir: string;
   repoPath: string;
   remotePath: string;
-  mockBinPath: string;
-  ghStatePath: string;
+  llmMockBinPath: string;
+  liveCleanup?: {
+    repo: string;
+    token: string;
+    prNumber?: number;
+  };
+}
+
+interface LiveGithubConfig {
+  token: string;
+  repo: string;
+  baseBranch: string;
 }
 
 const fixtures: IntegrationFixture[] = [];
+
+function getLiveGithubConfig(): LiveGithubConfig | null {
+  const token = process.env.LIVE_GITHUB_TOKEN ?? process.env.GITHUB_TOKEN;
+  const repo = process.env.LIVE_GITHUB_REPO ?? "shamwow/ironsha-ios-test-fixture";
+  const baseBranch = process.env.LIVE_GITHUB_BASE_BRANCH ?? "main";
+
+  if (!token) {
+    return null;
+  }
+
+  return { token, repo, baseBranch };
+}
 
 function setupGitIdentity(cwd: string): void {
   execSync('git config user.name "ironsha-test"', { cwd, stdio: "pipe" });
@@ -51,6 +72,40 @@ function createMockClaudeScript(): string {
     '    type: "assistant",',
     '    message: { content: [{ type: "text", text }] },',
     '  }) + "\\n");',
+    "}",
+    "",
+    "function extractThreadIds(prompt) {",
+    "  const matches = [...prompt.matchAll(/^### Thread ([^ ]+) \\(/gm)];",
+    "  return matches.map((match) => match[1]);",
+    "}",
+    "",
+    "function buildReviewResponse(prompt) {",
+    '  if (!prompt.includes("No existing review threads.")) {',
+    '    return ["```json", "{\\"comments\\":[],\\"summary\\":\\"Mock review approval after follow-up.\\",\\"event\\":\\"APPROVE\\"}", "```"].join("\\n");',
+    "  }",
+    "  return [",
+    '    "```json",',
+    '    JSON.stringify({',
+    '      summary: "Mock review requests follow-up changes.",',
+    '      event: "REQUEST_CHANGES",',
+    '      comments: [',
+    '        { path: "src/task.txt", line: 1, body: "Clarify the completed task wording before merge." },',
+    '        { path: "src/task.txt", line: 999, body: "Add a follow-up note for reviewers. [fallback-thread]" },',
+    '      ],',
+    '    }),',
+    '    "```",',
+    '  ].join("\\n");',
+    "}",
+    "",
+    "function buildFixResponse(prompt) {",
+    '  const targetDir = join(process.cwd(), "src");',
+    "  mkdirSync(targetDir, { recursive: true });",
+    '  writeFileSync(join(targetDir, "review-followup.txt"), "Reviewer follow-up addressed.\\n");',
+    "  const threads = extractThreadIds(prompt).map((threadId) => ({",
+    "    thread_id: threadId,",
+    '    explanation: `Addressed review thread ${threadId} with the requested follow-up changes.`,',
+    "  }));",
+    '  return ["```json", JSON.stringify({ threads_addressed: threads }), "```"].join("\\n");',
     "}",
     "",
     "const PLAN = [",
@@ -93,12 +148,12 @@ function createMockClaudeScript(): string {
     "  }",
     "",
     '  if (prompt.includes("Perform BOTH architecture and detailed review in a single pass.")) {',
-    '    emit(["```json", "{\\"comments\\":[],\\"summary\\":\\"Mock review approval.\\",\\"event\\":\\"APPROVE\\"}", "```"].join("\\n"));',
+    "    emit(buildReviewResponse(prompt));",
     "    return;",
     "  }",
     "",
     '  if (prompt.includes("Address all UNRESOLVED threads.")) {',
-    '    emit(["```json", "{\\"threads_addressed\\":[]}", "```"].join("\\n"));',
+    "    emit(buildFixResponse(prompt));",
     "    return;",
     "  }",
     "",
@@ -130,6 +185,40 @@ function createMockCodexScript(): string {
     "",
     "function emitJson(event) {",
     '  process.stdout.write(JSON.stringify(event) + "\\n");',
+    "}",
+    "",
+    "function extractThreadIds(prompt) {",
+    "  const matches = [...prompt.matchAll(/^### Thread ([^ ]+) \\(/gm)];",
+    "  return matches.map((match) => match[1]);",
+    "}",
+    "",
+    "function buildReviewResponse(prompt) {",
+    '  if (!prompt.includes("No existing review threads.")) {',
+    '    return ["```json", "{\\"comments\\":[],\\"summary\\":\\"Mock review approval after follow-up.\\",\\"event\\":\\"APPROVE\\"}", "```"].join("\\n");',
+    "  }",
+    "  return [",
+    '    "```json",',
+    '    JSON.stringify({',
+    '      summary: "Mock review requests follow-up changes.",',
+    '      event: "REQUEST_CHANGES",',
+    '      comments: [',
+    '        { path: "src/task.txt", line: 1, body: "Clarify the completed task wording before merge." },',
+    '        { path: "src/task.txt", line: 999, body: "Add a follow-up note for reviewers. [fallback-thread]" },',
+    '      ],',
+    '    }),',
+    '    "```",',
+    '  ].join("\\n");',
+    "}",
+    "",
+    "function buildFixResponse(prompt) {",
+    '  const targetDir = join(process.cwd(), "src");',
+    "  mkdirSync(targetDir, { recursive: true });",
+    '  writeFileSync(join(targetDir, "review-followup.txt"), "Reviewer follow-up addressed.\\n");',
+    "  const threads = extractThreadIds(prompt).map((threadId) => ({",
+    "    thread_id: threadId,",
+    '    explanation: `Addressed review thread ${threadId} with the requested follow-up changes.`,',
+    "  }));",
+    '  return ["```json", JSON.stringify({ threads_addressed: threads }), "```"].join("\\n");',
     "}",
     "",
     "const PLAN = [",
@@ -165,9 +254,9 @@ function createMockCodexScript(): string {
     '      "- Run `node scripts/verify-task.js`",',
     '    ].join("\\n");',
     '  } else if (prompt.includes("Perform BOTH architecture and detailed review in a single pass.")) {',
-    '    finalMessage = ["```json", "{\\"comments\\":[],\\"summary\\":\\"Mock review approval.\\",\\"event\\":\\"APPROVE\\"}", "```"].join("\\n");',
+    "    finalMessage = buildReviewResponse(prompt);",
     '  } else if (prompt.includes("Address all UNRESOLVED threads.")) {',
-    '    finalMessage = ["```json", "{\\"threads_addressed\\":[]}", "```"].join("\\n");',
+    "    finalMessage = buildFixResponse(prompt);",
     "  }",
     "",
     '  emitJson({ type: "message", role: "assistant", content: [{ type: "output_text", text: finalMessage }] });',
@@ -182,197 +271,71 @@ function createMockCodexScript(): string {
   ].join("\n");
 }
 
-function createMockGhScript(): string {
-  return [
-    "#!/usr/bin/env node",
-    'const { execFileSync } = require("node:child_process");',
-    'const { existsSync, readFileSync, writeFileSync } = require("node:fs");',
-    "",
-    "function loadState() {",
-    '  const path = process.env.MOCK_GH_STATE_PATH;',
-    '  if (!path) throw new Error("MOCK_GH_STATE_PATH is required");',
-    "  if (!existsSync(path)) {",
-    "    return { path, state: { pr: null } };",
-    "  }",
-    '  return { path, state: JSON.parse(readFileSync(path, "utf8")) };',
-    "}",
-    "",
-    "function saveState(path, state) {",
-    "  writeFileSync(path, JSON.stringify(state, null, 2));",
-    "}",
-    "",
-    "function parseFlag(args, name) {",
-    "  const index = args.indexOf(name);",
-    "  return index === -1 ? undefined : args[index + 1];",
-    "}",
-    "",
-    "function readInput(args) {",
-    '  return args.includes("--input") ? readFileSync(0, "utf8") : "";',
-    "}",
-    "",
-    "const args = process.argv.slice(2);",
-    "const { path: statePath, state } = loadState();",
-    "",
-    'if (args[0] === "pr" && args[1] === "view") {',
-    "  if (!state.pr) process.exit(1);",
-    '  const jq = parseFlag(args, "--jq");',
-    '  if (jq === ".number") {',
-    "    process.stdout.write(String(state.pr.number));",
-    "    process.exit(0);",
-    "  }",
-    '  if (jq === ".url") {',
-    "    process.stdout.write(state.pr.url);",
-    "    process.exit(0);",
-    "  }",
-    "  process.stdout.write(JSON.stringify(state.pr));",
-    "  process.exit(0);",
-    "}",
-    "",
-    'if (args[0] === "pr" && args[1] === "create") {',
-    '  const title = parseFlag(args, "--title") || "";',
-    '  const body = parseFlag(args, "--body") || "";',
-    '  const base = parseFlag(args, "--base") || "main";',
-    '  const headBranch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {',
-    "    cwd: process.cwd(),",
-    '    encoding: "utf8",',
-    "  }).trim();",
-    "  state.pr = {",
-    "    number: 1,",
-    '    url: "https://github.com/mock/mock-repo/pull/1",',
-    "    title,",
-    "    body,",
-    "    base,",
-    "    headBranch,",
-    "    reviews: [],",
-    "    comments: [],",
-    "    labels: [],",
-    "  };",
-    "  saveState(statePath, state);",
-    "  process.stdout.write(state.pr.url);",
-    "  process.exit(0);",
-    "}",
-    "",
-    'if (args[0] === "pr" && args[1] === "edit") {',
-    "  if (!state.pr) process.exit(1);",
-    '  state.pr.body = parseFlag(args, "--body") || state.pr.body;',
-    "  saveState(statePath, state);",
-    "  process.exit(0);",
-    "}",
-    "",
-    'if (args[0] === "api") {',
-    '  const endpoint = args[1] || "";',
-    "  const input = readInput(args);",
-    "  const payload = input ? JSON.parse(input) : null;",
-    "",
-    '  if (endpoint.endsWith("/files")) {',
-    '    process.stdout.write("[]");',
-    "    process.exit(0);",
-    "  }",
-    "",
-    '  if (endpoint.endsWith("/reviews")) {',
-    "    if (!state.pr) process.exit(1);",
-    "    state.pr.reviews.push(payload);",
-    "    saveState(statePath, state);",
-    '    process.stdout.write("{}");',
-    "    process.exit(0);",
-    "  }",
-    "",
-    '  if (endpoint.endsWith("/comments")) {',
-    '    const isPaginate = args.includes("--paginate");',
-    "    if (isPaginate) {",
-    '      process.stdout.write(JSON.stringify(state.pr?.comments || []));',
-    "      process.exit(0);",
-    "    }",
-    "  }",
-    "",
-    '  if (/\\/issues\\/\\d+\\/labels\\//.test(endpoint) && args.includes("-X")) {',
-    '    const label = endpoint.split("/").pop();',
-    "    if (state.pr && label) {",
-    '      state.pr.labels = (state.pr.labels || []).filter((entry) => entry !== label);',
-    "      saveState(statePath, state);",
-    "    }",
-    "    process.exit(0);",
-    "  }",
-    "",
-    '  if (endpoint.endsWith("/labels")) {',
-    "    if (!state.pr) process.exit(1);",
-    "    state.pr.labels = payload?.labels || [];",
-    "    saveState(statePath, state);",
-    '    process.stdout.write("{}");',
-    "    process.exit(0);",
-    "  }",
-    "",
-    '  process.stdout.write("{}");',
-    "  process.exit(0);",
-    "}",
-    "",
-    'process.stderr.write("Unsupported gh invocation: " + args.join(" ") + "\\n");',
-    "process.exit(1);",
-    "",
-  ].join("\n");
-}
-
-function createIntegrationFixture(runId: string): IntegrationFixture {
-  const rootDir = mkdtempSync(join(tmpdir(), "ironsha-orchestrate-"));
+function createLiveGithubFixture(runId: string, live: LiveGithubConfig): IntegrationFixture {
+  const rootDir = mkdtempSync(join(tmpdir(), "ironsha-orchestrate-live-"));
   const repoPath = join(rootDir, "repo");
-  const remotePath = join(rootDir, "remote.git");
-  const mockBinPath = join(rootDir, "mock-bin");
-  const ghStatePath = join(rootDir, "gh-state.json");
+  const llmMockBinPath = join(rootDir, "mock-llm-bin");
+  const remotePath = `https://x-access-token:${live.token}@github.com/${live.repo}.git`;
 
-  mkdirSync(repoPath, { recursive: true });
-  mkdirSync(mockBinPath, { recursive: true });
+  mkdirSync(llmMockBinPath, { recursive: true });
 
-  execSync("git init --bare remote.git", { cwd: rootDir, stdio: "pipe" });
-  execSync("git init -b main", { cwd: repoPath, stdio: "pipe" });
+  execSync(`git clone --branch "${live.baseBranch}" "${remotePath}" "${repoPath}"`, {
+    stdio: "pipe",
+  });
   setupGitIdentity(repoPath);
 
-  mkdirSync(join(repoPath, "scripts"), { recursive: true });
-  mkdirSync(join(repoPath, "src"), { recursive: true });
+  writeExecutable(join(llmMockBinPath, "claude"), createMockClaudeScript());
+  writeExecutable(join(llmMockBinPath, "codex"), createMockCodexScript());
 
-  writeFileSync(
-    join(repoPath, "README.md"),
-    [
-      "# Integration Fixture",
-      "",
-      "## Test",
-      "```sh",
-      "node scripts/verify-task.js",
-      "```",
-      "",
-    ].join("\n"),
-  );
-  writeFileSync(
-    join(repoPath, "scripts", "verify-task.js"),
-    [
-      'const { readFileSync } = require("node:fs");',
-      'const contents = readFileSync("src/task.txt", "utf8").trim();',
-      'if (contents !== "Task completed by mock implementer.") {',
-      '  console.error("Task file was not updated correctly.");',
-      "  process.exit(1);",
-      "}",
-    ].join("\n"),
-  );
-  writeFileSync(join(repoPath, "src", "task.txt"), `TODO ${runId}\n`);
-
-  execSync("git add -A", { cwd: repoPath, stdio: "pipe" });
-  execSync('git commit -m "initial fixture"', { cwd: repoPath, stdio: "pipe" });
-  execSync(`git remote add origin "${remotePath}"`, { cwd: repoPath, stdio: "pipe" });
-  execSync("git push -u origin main", { cwd: repoPath, stdio: "pipe" });
-
-  writeExecutable(join(mockBinPath, "claude"), createMockClaudeScript());
-  writeExecutable(join(mockBinPath, "codex"), createMockCodexScript());
-  writeExecutable(join(mockBinPath, "gh"), createMockGhScript());
-  writeFileSync(ghStatePath, JSON.stringify({ pr: null }, null, 2));
-
-  return { rootDir, repoPath, remotePath, mockBinPath, ghStatePath };
+  return {
+    rootDir,
+    repoPath,
+    remotePath,
+    llmMockBinPath,
+    liveCleanup: { repo: live.repo, token: live.token },
+  };
 }
 
 function cleanupFixture(fixture: IntegrationFixture): void {
+  if (fixture.liveCleanup?.prNumber) {
+    try {
+      execFileSync(
+        "gh",
+        [
+          "pr",
+          "close",
+          String(fixture.liveCleanup.prNumber),
+          "--repo",
+          fixture.liveCleanup.repo,
+          "--delete-branch",
+        ],
+        {
+          env: { ...process.env, GH_TOKEN: fixture.liveCleanup.token },
+          stdio: ["pipe", "pipe", "pipe"],
+        },
+      );
+    } catch {
+      // Best-effort cleanup for live GitHub test runs.
+    }
+  }
   try {
     rmSync(fixture.rootDir, { recursive: true, force: true });
   } catch {
     // Best-effort cleanup for temporary test repos.
   }
+}
+
+function runGhJson<T>(args: string[], token: string): T {
+  const output = execFileSync(
+    "gh",
+    args,
+    {
+      encoding: "utf8",
+      env: { ...process.env, GH_TOKEN: token },
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
+  return JSON.parse(output) as T;
 }
 
 describe("orchestrate integration", { timeout: 120_000 }, () => {
@@ -382,115 +345,163 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
     }
   });
 
-  it("completes the task and creates a GitHub PR with mock LLM responses", () => {
-    const runId = randomBytes(6).toString("hex");
-    const fixture = createIntegrationFixture(runId);
-    fixtures.push(fixture);
+  it(
+    "publishes a real GitHub PR from the build workflow using mock LLM responses",
+    { skip: !getLiveGithubConfig() },
+    () => {
+      const live = getLiveGithubConfig();
+      assert.ok(
+        live,
+        "Expected GITHUB_TOKEN for live GitHub integration",
+      );
 
-    const cliPath = join(import.meta.dirname, "..", "cli.js");
-    const env = {
-      ...process.env,
-      PATH: `${fixture.mockBinPath}:${process.env.PATH ?? ""}`,
-      MOCK_GH_STATE_PATH: fixture.ghStatePath,
-    };
+      const [owner, repo] = live.repo.split("/");
+      assert.ok(owner && repo, "LIVE_GITHUB_REPO must be in owner/repo format");
 
-    execFileSync(
-      process.execPath,
-      [
-        cliPath,
-        "Complete the task in src/task.txt and open a PR",
-        "--plan-llm", "claude:mock",
-        "--review-llm", "claude:mock",
-        "--implement-llm", "claude:mock",
-        "--pr-llm", "claude:mock",
-      ],
-      {
-        cwd: fixture.repoPath,
-        env,
-        stdio: "pipe",
-      },
-    );
+      const runId = randomBytes(6).toString("hex");
+      const fixture = createLiveGithubFixture(runId, live);
+      fixtures.push(fixture);
 
-    const ghState = JSON.parse(readFileSync(fixture.ghStatePath, "utf8")) as {
-      pr: {
+      const cliPath = join(import.meta.dirname, "..", "cli.js");
+      const env = {
+        ...process.env,
+        PATH: `${fixture.llmMockBinPath}:${process.env.PATH ?? ""}`,
+        GITHUB_TOKEN: live.token,
+        GH_TOKEN: live.token,
+      };
+
+      const buildResult = spawnSync(
+        process.execPath,
+        [
+          cliPath,
+          "Complete the task in src/task.txt and open a PR",
+          "--plan-llm", "codex:gpt-5.4",
+          "--review-llm", "codex:gpt-5.4",
+          "--implement-llm", "codex:gpt-5.4",
+          "--pr-llm", "codex:gpt-5.4",
+        ],
+        {
+          cwd: fixture.repoPath,
+          encoding: "utf8",
+          env,
+          stdio: "pipe",
+        },
+      );
+      assert.equal(buildResult.status, 0, buildResult.stderr || buildResult.stdout || "build failed");
+      const buildOutput = `${buildResult.stdout ?? ""}\n${buildResult.stderr ?? ""}`;
+      const prUrlMatch = buildOutput.match(/Published:\s+(https:\/\/github\.com\/[^\s]+\/pull\/(\d+))/);
+      assert.ok(prUrlMatch, `Expected build output to include published PR URL.\n${buildOutput}`);
+      const prNumber = Number(prUrlMatch[2]);
+      assert.ok(Number.isInteger(prNumber) && prNumber > 0, "Expected a valid PR number from build output");
+      fixture.liveCleanup ??= { repo: live.repo, token: live.token };
+      fixture.liveCleanup.prNumber = prNumber;
+
+      type GhPr = {
         number: number;
         title: string;
         body: string;
-        base: string;
-        headBranch: string;
-        labels: string[];
-        reviews: Array<{ event: string; body: string }>;
+        baseRefName: string;
+        headRefName: string;
+        url: string;
+        labels: Array<{ name: string }>;
+        reviews: Array<{ state: string; body?: string | null }>;
       };
-    };
+      type GhReviewComment = {
+        id: number;
+        body: string;
+        path?: string;
+        line?: number | null;
+        in_reply_to_id?: number;
+      };
+      type GhIssueComment = {
+        body: string;
+      };
+      type GhReaction = {
+        content: string;
+      };
 
-    assert.ok(ghState.pr, "Expected the mock GitHub CLI to record a PR");
-    assert.equal(ghState.pr.number, 1);
-    assert.equal(ghState.pr.base, "main");
-    assert.equal(ghState.pr.title, ghState.pr.headBranch);
-    assert.match(ghState.pr.body, /\*\*Summary\*\*/);
-    assert.match(ghState.pr.body, /`src\/task\.txt`/);
-    assert.match(ghState.pr.body, /`node scripts\/verify-task\.js`/);
-    assert.deepEqual(ghState.pr.labels, ["human-review-needed"]);
-    assert.equal(ghState.pr.reviews.length, 1);
-    assert.equal(ghState.pr.reviews[0]?.event, "APPROVE");
+      const prData = runGhJson<GhPr>(
+        [
+          "pr",
+          "view",
+          "--repo",
+          live.repo,
+          String(prNumber),
+          "--json",
+          "number,title,body,baseRefName,headRefName,url,labels,reviews",
+        ],
+        live.token,
+      );
 
-    const pushedTaskContents = execSync(
-      `git --git-dir="${fixture.remotePath}" show "${ghState.pr.headBranch}:src/task.txt"`,
-      { encoding: "utf8" },
-    ).trim();
-    assert.equal(pushedTaskContents, "Task completed by mock implementer.");
-  });
+      assert.equal(prData.number, prNumber);
+      assert.equal(prData.baseRefName, live.baseBranch);
+      assert.equal(prData.title, prData.headRefName);
+      assert.match(prData.body, /\*\*Summary\*\*/);
+      assert.match(prData.body, /`src\/task\.txt`/);
+      assert.match(prData.body, /`node scripts\/verify-task\.js`/);
+      assert.ok(
+        prData.labels.some((label) => label.name === "human-review-needed"),
+        "Expected published PR to have human-review-needed label",
+      );
+      assert.ok(
+        prData.reviews.some((review) => review.state === "APPROVED"),
+        "Expected published PR to contain an approval review",
+      );
 
-  it("streams raw codex jsonl into transcripts while still completing the task", () => {
-    const runId = randomBytes(6).toString("hex");
-    const fixture = createIntegrationFixture(runId);
-    fixtures.push(fixture);
+      const repoPath = `repos/${live.repo}`;
+      const reviewComments = runGhJson<GhReviewComment[]>(
+        ["api", `${repoPath}/pulls/${prNumber}/comments`, "--paginate"],
+        live.token,
+      );
+      const issueComments = runGhJson<GhIssueComment[]>(
+        ["api", `${repoPath}/issues/${prNumber}/comments`, "--paginate"],
+        live.token,
+      );
 
-    const cliPath = join(import.meta.dirname, "..", "cli.js");
-    const ironshaTmpRoot = join(tmpdir(), "ironsha");
-    const buildDirsBefore = new Set(
-      readdirSync(ironshaTmpRoot, { recursive: false })
-        .map((entry) => String(entry))
-        .filter((entry) => entry.startsWith("build-")),
-    );
-    const env = {
-      ...process.env,
-      PATH: `${fixture.mockBinPath}:${process.env.PATH ?? ""}`,
-      MOCK_GH_STATE_PATH: fixture.ghStatePath,
-    };
+      const topLevelInlineComments = reviewComments.filter((comment) => !comment.in_reply_to_id);
+      assert.ok(
+        prData.reviews.some((review) => /Mock review requests follow-up changes/.test(review.body ?? "")),
+        "Expected a reviewer summary comment requesting changes",
+      );
+      assert.ok(
+        topLevelInlineComments.some((comment) =>
+          comment.path === "src/task.txt" &&
+          comment.line === 1 &&
+          /Clarify the completed task wording/.test(comment.body),
+        ),
+        "Expected an inline reviewer comment on src/task.txt",
+      );
 
-    execFileSync(
-      process.execPath,
-      [
-        cliPath,
-        "Complete the task in src/task.txt and open a PR",
-        "--plan-llm", "codex:gpt-5.4",
-        "--review-llm", "codex:gpt-5.4",
-        "--implement-llm", "codex:gpt-5.4",
-        "--pr-llm", "codex:gpt-5.4",
-      ],
-      {
-        cwd: fixture.repoPath,
-        env,
-        stdio: "pipe",
-      },
-    );
+      const inlineReply = reviewComments.find((comment) =>
+        Boolean(comment.in_reply_to_id) && /Addressed review thread/.test(comment.body),
+      );
+      assert.ok(inlineReply, "Expected an inline author reply to a reviewer comment");
 
-    const buildDirsAfter = readdirSync(ironshaTmpRoot, { recursive: false })
-      .map((entry) => String(entry))
-      .filter((entry) => entry.startsWith("build-"));
-    const newBuildDir = buildDirsAfter.find((entry) => !buildDirsBefore.has(entry));
-    assert.ok(newBuildDir, "Expected a new orchestrator transcript directory");
+      assert.ok(
+        issueComments.some((comment) => /Addressed review thread/.test(comment.body)),
+        "Expected an author fallback comment response on the PR",
+      );
 
-    const transcriptRoot = join(ironshaTmpRoot, newBuildDir);
-    const transcriptFiles = execSync(`find "${transcriptRoot}" -type f -name '*.stdout.log' | sort`, {
-      encoding: "utf8",
-    }).trim().split("\n").filter(Boolean);
-    assert.ok(transcriptFiles.length > 0, "Expected codex transcript stdout files");
+      const resolvedComment = topLevelInlineComments.find((comment) =>
+        /Clarify the completed task wording/.test(comment.body),
+      );
+      assert.ok(resolvedComment, "Expected a resolvable inline reviewer thread");
+      const reactions = runGhJson<GhReaction[]>(
+        ["api", `${repoPath}/pulls/comments/${resolvedComment.id}/reactions`],
+        live.token,
+      );
+      const reactionKinds = new Set(reactions.map((reaction) => reaction.content));
+      assert.ok(
+        reactionKinds.has("rocket") && reactionKinds.has("+1"),
+        "Expected reviewer resolution reactions on the inline thread",
+      );
 
-    const firstTranscript = readFileSync(transcriptFiles[0], "utf8");
-    assert.match(firstTranscript, /"type":"session.started"/);
-    assert.match(firstTranscript, /"type":"message"/);
-    assert.match(firstTranscript, /"output_text"/);
-  });
+      execSync(`git fetch origin ${prData.headRefName}`, { cwd: fixture.repoPath, stdio: "pipe" });
+      const pushedTaskContents = execSync(
+        `git show FETCH_HEAD:src/task.txt`,
+        { cwd: fixture.repoPath, encoding: "utf8" },
+      ).trim();
+      assert.equal(pushedTaskContents, "Task completed by mock implementer.");
+    },
+  );
 });

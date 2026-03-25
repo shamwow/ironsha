@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { spawn, execFileSync, execSync } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { createWriteStream, readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -146,6 +146,18 @@ function parseArgs(argv: string[]): OrchestrateOptions {
 
 function llmLabel(llm: LlmConfig): string {
   return `${llm.provider}:${llm.model}`;
+}
+
+function runGit(
+  cwd: string,
+  args: string[],
+  options?: { encoding?: BufferEncoding },
+): string {
+  return execFileSync("git", args, {
+    cwd,
+    stdio: "pipe",
+    ...(options?.encoding ? { encoding: options.encoding } : {}),
+  }).toString();
 }
 
 // ---------------------------------------------------------------------------
@@ -329,10 +341,7 @@ function createWorktree(repoRoot: string): string {
   const worktreePath = join(worktreeDir, branchName);
 
   mkdirSync(worktreeDir, { recursive: true });
-  execSync(`git worktree add "${worktreePath}" -b "${branchName}"`, {
-    cwd: repoRoot,
-    stdio: "pipe",
-  });
+  runGit(repoRoot, ["worktree", "add", worktreePath, "-b", branchName]);
 
   return worktreePath;
 }
@@ -363,17 +372,13 @@ function readCommandFile(name: string): string {
 function detectPlatformFromDiff(cwd: string, baseBranch: string): string | null {
   let diffOutput: string;
   try {
-    diffOutput = execSync(`git diff --name-only origin/${baseBranch}...HEAD`, {
-      cwd,
+    diffOutput = runGit(cwd, ["diff", "--name-only", `origin/${baseBranch}...HEAD`], {
       encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
     });
   } catch {
     try {
-      diffOutput = execSync(`git diff --name-only ${baseBranch}...HEAD`, {
-        cwd,
+      diffOutput = runGit(cwd, ["diff", "--name-only", `${baseBranch}...HEAD`], {
         encoding: "utf-8",
-        stdio: ["pipe", "pipe", "pipe"],
       });
     } catch {
       return null;
@@ -569,10 +574,8 @@ async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<
 
   log("PR-REVIEW", "Committing changes...");
   try {
-    execSync("git add -A && git commit -m 'orchestrate: implementation changes'", {
-      cwd,
-      stdio: "pipe",
-    });
+    runGit(cwd, ["add", "-A"]);
+    runGit(cwd, ["commit", "-m", "orchestrate: implementation changes"]);
   } catch {
     log("PR-REVIEW", "No changes to commit (or already committed).");
   }
@@ -698,10 +701,8 @@ Output ONLY the description text, no other commentary.`,
 
     // Commit fixes
     try {
-      execSync(`git add -A && git commit -m 'orchestrate: address review cycle ${cycle}'`, {
-        cwd,
-        stdio: "pipe",
-      });
+      runGit(cwd, ["add", "-A"]);
+      runGit(cwd, ["commit", "-m", `orchestrate: address review cycle ${cycle}`]);
     } catch {
       log("PR-REVIEW", "No changes to commit after fix pass.");
     }
@@ -713,10 +714,8 @@ Output ONLY the description text, no other commentary.`,
 
   // Commit any outstanding changes before publish
   try {
-    execSync("git add -A && git commit -m 'orchestrate: final changes'", {
-      cwd,
-      stdio: "pipe",
-    });
+    runGit(cwd, ["add", "-A"]);
+    runGit(cwd, ["commit", "-m", "orchestrate: final changes"]);
   } catch {
     // Nothing to commit
   }
