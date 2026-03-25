@@ -47,3 +47,4 @@ After making all changes, output a single JSON block:
 - Do not refactor surrounding code unless a review comment specifically requests it
 - If a review comment is unclear or impossible to address, still include it in `threads_addressed` with an explanation of why you couldn't make the change
 - Do not add new features or improvements beyond what the review comments request
+- Do NOT run any `label` commands or change the PR label — only the review pipeline can set labels

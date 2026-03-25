@@ -15,6 +15,12 @@ const VALID_LABELS: readonly string[] = [
   "human-review-needed", "bot-human-intervention",
 ];
 
+/** Labels that can be set directly via `label set`. `human-review-needed` is
+ *  excluded — it can only be set by `review post` when the review passes. */
+const DIRECTLY_SETTABLE_LABELS: readonly string[] = [
+  "bot-review-needed", "bot-changes-needed", "bot-human-intervention",
+];
+
 const execFileAsync = promisify(execFile);
 
 /**
@@ -479,9 +485,13 @@ async function main(): Promise<void> {
           console.error("Usage: ironsha-state label set <label>");
           process.exit(1);
         }
-        if (!VALID_LABELS.includes(label)) {
-          console.error(`Invalid label: ${label}`);
-          console.error(`Valid labels: ${VALID_LABELS.join(", ")}`);
+        if (!DIRECTLY_SETTABLE_LABELS.includes(label)) {
+          if (label === "human-review-needed") {
+            console.error(`Cannot set human-review-needed directly — it is set automatically by 'review post' when the review passes.`);
+          } else {
+            console.error(`Invalid label: ${label}`);
+            console.error(`Valid labels: ${DIRECTLY_SETTABLE_LABELS.join(", ")}`);
+          }
           process.exit(1);
         }
         await backend.setLabel(pr, label);
