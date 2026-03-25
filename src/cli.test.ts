@@ -120,5 +120,7 @@ test("buildQaReviewPrompt requires visual evidence validation for UI changes", (
   assert.match(prompt, /Playwright-driven visual evidence/i);
   assert.match(prompt, /XcodeBuildMCP-driven visual evidence/i);
   assert.match(prompt, /actually show the implemented feature/i);
+  assert.match(prompt, /uploaded correctly/i);
+  assert.match(prompt, /render or open successfully from the PR instead of 404ing/i);
   assert.match(prompt, /git diff origin\/main\.\.\.HEAD/);
 });

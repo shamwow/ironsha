@@ -108,6 +108,13 @@ function createMockClaudeScript(): string {
     '  return ["```json", JSON.stringify({ threads_addressed: threads }), "```"].join("\\n");',
     "}",
     "",
+    "function writeVisualEvidence() {",
+    '  const artifactDir = join(process.cwd(), "qa", "artifacts");',
+    "  mkdirSync(artifactDir, { recursive: true });",
+    '  writeFileSync(join(artifactDir, "mock-ui-screenshot.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yh1cAAAAASUVORK5CYII=", "base64"));',
+    '  writeFileSync(join(artifactDir, "mock-ui-demo.mp4"), Buffer.from("AAAAIGZ0eXBpc29tAAAAAGlzb21pc28yYXZjMW1wNDEAABBtb292AAAAbG12aGQAAAAAAAAAAAAAAAAAAAPoAAAD6AABAAABAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACc3RibAAAAAAAAAABAAABH21kYXQAAAAA", "base64"));',
+    "}",
+    "",
     "function buildQaReviewResponse(prompt) {",
     '  const hasToolingInstructions = prompt.includes("Playwright-driven visual evidence") && prompt.includes("XcodeBuildMCP-driven visual evidence");',
     '  if (!hasToolingInstructions) {',
@@ -145,6 +152,7 @@ function createMockClaudeScript(): string {
     '    const targetDir = join(process.cwd(), "src");',
     "    mkdirSync(targetDir, { recursive: true });",
     '    writeFileSync(join(targetDir, "task.txt"), "Task completed by mock implementer.\\n");',
+    "    writeVisualEvidence();",
     '    emit("Implementation complete.");',
     "    return;",
     "  }",
@@ -156,6 +164,10 @@ function createMockClaudeScript(): string {
     '      "",',
     '      "**Test plan**",',
     '      "- Run `node scripts/verify-task.js`",',
+    '      "",',
+    '      "**Visual evidence**",',
+    '      "- Screenshot: ![Mock UI screenshot](./qa/artifacts/mock-ui-screenshot.png)",',
+    '      "- Video: [Mock UI demo recording](./qa/artifacts/mock-ui-demo.mp4)",',
     '    ].join("\\n"));',
     "    return;",
     "  }",
@@ -244,6 +256,13 @@ function createMockCodexScript(): string {
     '  return ["```json", JSON.stringify({ threads_addressed: threads }), "```"].join("\\n");',
     "}",
     "",
+    "function writeVisualEvidence() {",
+    '  const artifactDir = join(process.cwd(), "qa", "artifacts");',
+    "  mkdirSync(artifactDir, { recursive: true });",
+    '  writeFileSync(join(artifactDir, "mock-ui-screenshot.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yh1cAAAAASUVORK5CYII=", "base64"));',
+    '  writeFileSync(join(artifactDir, "mock-ui-demo.mp4"), Buffer.from("AAAAIGZ0eXBpc29tAAAAAGlzb21pc28yYXZjMW1wNDEAABBtb292AAAAbG12aGQAAAAAAAAAAAAAAAAAAAPoAAAD6AABAAABAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACc3RibAAAAAAAAAABAAABH21kYXQAAAAA", "base64"));',
+    "}",
+    "",
     "function buildQaReviewResponse(prompt) {",
     '  const hasToolingInstructions = prompt.includes("Playwright-driven visual evidence") && prompt.includes("XcodeBuildMCP-driven visual evidence");',
     '  if (!hasToolingInstructions) {',
@@ -277,6 +296,7 @@ function createMockCodexScript(): string {
     '    const targetDir = join(process.cwd(), "src");',
     "    mkdirSync(targetDir, { recursive: true });",
     '    writeFileSync(join(targetDir, "task.txt"), "Task completed by mock implementer.\\n");',
+    "    writeVisualEvidence();",
     '    finalMessage = "Implementation complete.";',
     '  } else if (prompt.includes("Write a PR description that includes:")) {',
     "    finalMessage = [",
@@ -285,6 +305,10 @@ function createMockCodexScript(): string {
     '      "",',
     '      "**Test plan**",',
     '      "- Run `node scripts/verify-task.js`",',
+    '      "",',
+    '      "**Visual evidence**",',
+    '      "- Screenshot: ![Mock UI screenshot](./qa/artifacts/mock-ui-screenshot.png)",',
+    '      "- Video: [Mock UI demo recording](./qa/artifacts/mock-ui-demo.mp4)",',
     '    ].join("\\n");',
     '  } else if (prompt.includes("Perform BOTH architecture and detailed review in a single pass.")) {',
     "    finalMessage = buildReviewResponse(prompt);",
@@ -344,7 +368,6 @@ function cleanupFixture(fixture: IntegrationFixture): void {
           String(fixture.liveCleanup.prNumber),
           "--repo",
           fixture.liveCleanup.repo,
-          "--delete-branch",
         ],
         {
           env: { ...process.env, GH_TOKEN: fixture.liveCleanup.token },
@@ -433,6 +456,7 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
       assert.ok(Number.isInteger(prNumber) && prNumber > 0, "Expected a valid PR number from build output");
       fixture.liveCleanup ??= { repo: live.repo, token: live.token };
       fixture.liveCleanup.prNumber = prNumber;
+      const repoPath = `repos/${live.repo}`;
 
       type GhPr = {
         number: number;
@@ -443,6 +467,11 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
         url: string;
         labels: Array<{ name: string }>;
         reviews: Array<{ state: string; body?: string | null }>;
+      };
+      type GhIssueRendered = {
+        body: string;
+        body_html?: string;
+        body_text?: string;
       };
       type GhReviewComment = {
         id: number;
@@ -474,9 +503,14 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
       assert.equal(prData.number, prNumber);
       assert.equal(prData.baseRefName, live.baseBranch);
       assert.equal(prData.title, prData.headRefName);
+      const expectedScreenshotUrl = `https://github.com/${live.repo}/blob/${prData.headRefName}/qa/artifacts/mock-ui-screenshot.png?raw=true`;
+      const expectedVideoUrl = `https://github.com/${live.repo}/blob/${prData.headRefName}/qa/artifacts/mock-ui-demo.mp4`;
       assert.match(prData.body, /\*\*Summary\*\*/);
       assert.match(prData.body, /`src\/task\.txt`/);
       assert.match(prData.body, /`node scripts\/verify-task\.js`/);
+      assert.match(prData.body, /\*\*Visual evidence\*\*/);
+      assert.match(prData.body, new RegExp(`!\\[Mock UI screenshot\\]\\(${expectedScreenshotUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`));
+      assert.match(prData.body, new RegExp(`\\[Mock UI demo recording\\]\\(${expectedVideoUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`));
       assert.ok(
         prData.labels.some((label) => label.name === "agent-code-review-passed"),
         "Expected published PR to have the code review pass label",
@@ -493,7 +527,20 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
         "Expected published PR to contain an approval review",
       );
 
-      const repoPath = `repos/${live.repo}`;
+      const renderedPr = runGhJson<GhIssueRendered>(
+        [
+          "api",
+          `${repoPath}/issues/${prNumber}`,
+          "-H",
+          "Accept: application/vnd.github.full+json",
+        ],
+        live.token,
+      );
+      assert.match(renderedPr.body, /\*\*Visual evidence\*\*/);
+      assert.ok(renderedPr.body_html, "Expected GitHub to return rendered PR HTML");
+      assert.match(renderedPr.body_html!, new RegExp(`<img[^>]+${expectedScreenshotUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i"));
+      assert.match(renderedPr.body_html!, new RegExp(`<a[^>]+${expectedVideoUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i"));
+
       const reviewComments = runGhJson<GhReviewComment[]>(
         ["api", `${repoPath}/pulls/${prNumber}/comments`, "--paginate"],
         live.token,
@@ -547,6 +594,16 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
         { cwd: fixture.repoPath, encoding: "utf8" },
       ).trim();
       assert.equal(pushedTaskContents, "Task completed by mock implementer.");
+      const pushedScreenshot = execSync(
+        `git show FETCH_HEAD:qa/artifacts/mock-ui-screenshot.png`,
+        { cwd: fixture.repoPath, stdio: "pipe" },
+      );
+      assert.ok(pushedScreenshot.length > 0, "Expected pushed branch to include the mock screenshot artifact");
+      const pushedVideo = execSync(
+        `git show FETCH_HEAD:qa/artifacts/mock-ui-demo.mp4`,
+        { cwd: fixture.repoPath, stdio: "pipe" },
+      );
+      assert.ok(pushedVideo.length > 0, "Expected pushed branch to include the mock video artifact");
     },
   );
 });

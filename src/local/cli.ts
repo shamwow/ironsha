@@ -26,11 +26,63 @@ const REQUIRED_PASS_LABELS: readonly PassLabel[] = [
   "agent-qa-review-passed",
 ];
 
+const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "avif"]);
+const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "webm", "m4v"]);
+
 function passLabelForPhase(phase: string | undefined): PassLabel {
   return phase === "qa" ? "agent-qa-review-passed" : "agent-code-review-passed";
 }
 
 const execFileAsync = promisify(execFile);
+
+function isExternalUrl(target: string): boolean {
+  return /^(?:[a-z]+:)?\/\//i.test(target) || target.startsWith("#");
+}
+
+function trimLocalPrefix(target: string): string {
+  return target.replace(/^[.][/\\]+/, "").replace(/^[/\\]+/, "");
+}
+
+function fileExtension(target: string): string {
+  const clean = target.split(/[?#]/, 1)[0];
+  const ext = clean.includes(".") ? clean.slice(clean.lastIndexOf(".") + 1) : "";
+  return ext.toLowerCase();
+}
+
+function buildBlobUrl(pr: PRInfo, relativePath: string, raw: boolean): string {
+  const normalized = trimLocalPrefix(relativePath).split("\\").join("/");
+  const encodedPath = normalized.split("/").map(encodeURIComponent).join("/");
+  const base = `https://github.com/${pr.owner}/${pr.repo}/blob/${encodeURIComponent(pr.branch)}/${encodedPath}`;
+  return raw ? `${base}?raw=true` : base;
+}
+
+export function rewriteMediaReferencesForGithub(body: string, pr: PRInfo): string {
+  const rewriteImage = (_match: string, alt: string, target: string): string => {
+    if (isExternalUrl(target)) {
+      return `![${alt}](${target})`;
+    }
+    const ext = fileExtension(target);
+    if (!IMAGE_EXTENSIONS.has(ext)) {
+      return `![${alt}](${target})`;
+    }
+    return `![${alt}](${buildBlobUrl(pr, target, true)})`;
+  };
+
+  const rewriteLink = (_match: string, label: string, target: string): string => {
+    if (isExternalUrl(target)) {
+      return `[${label}](${target})`;
+    }
+    const ext = fileExtension(target);
+    if (!IMAGE_EXTENSIONS.has(ext) && !VIDEO_EXTENSIONS.has(ext)) {
+      return `[${label}](${target})`;
+    }
+    return `[${label}](${buildBlobUrl(pr, target, IMAGE_EXTENSIONS.has(ext))})`;
+  };
+
+  return body
+    .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, rewriteImage)
+    .replace(/(?<!!)\[([^\]]+)\]\(([^)\s]+)\)/g, rewriteLink);
+}
 
 /**
  * Resolve a (possibly prefix-based) comment ID to the full UUID by scanning
@@ -243,15 +295,16 @@ async function publishToGitHub(
 
     // Update description if set
     if (state.description) {
+      const githubDescription = rewriteMediaReferencesForGithub(state.description, pr);
       execFileSync(
-        "gh", ["pr", "edit", String(prNumber), "--body", state.description],
+        "gh", ["pr", "edit", String(prNumber), "--body", githubDescription],
         { cwd: checkoutPath, stdio: "pipe", ...devEnv },
       );
     }
   } catch {
     // No existing PR — create one
     const title = state.pr.title || `${pr.branch}`;
-    const body = state.description || "";
+    const body = rewriteMediaReferencesForGithub(state.description || "", pr);
     const result = runGh(
       ["pr", "create", "--title", title, "--body", body, "--base", pr.baseBranch],
       devEnv,
