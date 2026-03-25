@@ -1,33 +1,14 @@
-# ironsha-local — Local PR Review Workflow
+# ironsha-pr — Local PR Review Workflow
 
 ## Usage
 
-`/ironsha-local <task description>`
+`/ironsha-pr`
 
-Runs the full plan → implement → review → iterate → publish workflow locally. The review loop runs entirely against local state (no GitHub round-trips) until the reviewer approves, then publishes everything to GitHub as a PR.
+Runs the review → iterate → publish workflow locally on existing changes. The review loop runs entirely against local state (no GitHub round-trips) until the reviewer approves, then publishes everything to GitHub as a PR.
 
 ---
 
-## Step 1: Plan
-
-Enter plan mode and collaborate with the user on an implementation plan:
-
-1. Use the Explore agent to understand the relevant parts of the codebase
-2. Design the implementation approach
-3. Write the plan to the plan file
-4. Exit plan mode and get user approval
-
-Do not proceed until the user approves the plan.
-
-## Step 2: Implement
-
-Execute the approved plan:
-
-1. Write the code changes
-2. Follow existing patterns and conventions in the codebase
-3. Read `AGENTS.md`, `CLAUDE.md`, and `ARCHITECTURE.md` if they exist
-
-## Step 3: CI
+## Step 1: CI
 
 Run build and tests:
 
@@ -35,7 +16,7 @@ Run build and tests:
 2. Run them and verify they pass
 3. If they fail, fix the issues and re-run until green
 
-## Step 4: Create local PR
+## Step 2: Create local PR
 
 Initialize local review state and write the PR description:
 
@@ -58,7 +39,7 @@ Store the description:
 npm run state -- description set --body "<description>"
 ```
 
-## Step 5: Review
+## Step 3: Review
 
 Read the ironsha review prompts to construct the reviewer instructions:
 - `src/prompts/base.md` — core reviewer protocol and JSON output format
@@ -95,10 +76,10 @@ Check the resulting label:
 npm run state -- label
 ```
 
-If `human-review-needed` → go to Step 8.
-If `bot-changes-needed` → go to Step 6.
+If `human-review-needed` → go to Step 6.
+If `bot-changes-needed` → go to Step 4.
 
-## Step 6: Iterate
+## Step 4: Iterate
 
 Read the current review threads:
 ```bash
@@ -123,13 +104,13 @@ After the fix subagent completes:
    npm run state -- resolve <comment-id>
    ```
 
-2. Re-run CI (Step 3 — build and tests)
+2. Re-run CI (Step 1 — build and tests)
 
-3. Go back to Step 5 (review again)
+3. Go back to Step 3 (review again)
 
-## Step 7: Cycle limit
+## Step 5: Cycle limit
 
-Repeat Steps 5-6 for a maximum of 5 cycles. If the reviewer has not approved after 5 cycles:
+Repeat Steps 3-4 for a maximum of 5 cycles. If the reviewer has not approved after 5 cycles:
 
 ```bash
 npm run state -- label set bot-human-intervention
@@ -137,7 +118,7 @@ npm run state -- label set bot-human-intervention
 
 Inform the user that the review loop did not converge and manual intervention is needed.
 
-## Step 8: Publish
+## Step 6: Publish
 
 Once the label is `human-review-needed`, publish everything to GitHub:
 
