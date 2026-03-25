@@ -1,3 +1,5 @@
+import "dotenv/config";
+
 export type AgentProvider = "claude";
 
 function optionalEnvFrom(
