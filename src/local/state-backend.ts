@@ -55,6 +55,11 @@ export class LocalStateBackend implements StateBackend {
     return this.state.label;
   }
 
+  async setDescription(description: string): Promise<void> {
+    this.state.description = description;
+    await this.persist();
+  }
+
   private async persist(): Promise<void> {
     this.state.updatedAt = new Date().toISOString();
     const dir = dirname(this.statePath);

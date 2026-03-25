@@ -14,7 +14,7 @@ done
 # --- Commands ---
 CLAUDE_CMD_DIR="${HOME}/.claude/commands"
 mkdir -p "$CLAUDE_CMD_DIR"
-for cmd in learn save load; do
+for cmd in learn save load ironsha-local; do
   ln -sf "$SCRIPT_DIR/commands/$cmd.md" "$CLAUDE_CMD_DIR/$cmd.md"
   echo "Installed /$cmd → $CLAUDE_CMD_DIR/$cmd.md (symlink)"
 done

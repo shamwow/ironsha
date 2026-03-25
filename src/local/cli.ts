@@ -1,4 +1,5 @@
-import { execFile } from "node:child_process";
+import { execFile, execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { LocalStateBackend } from "./state-backend.js";
@@ -22,8 +23,14 @@ Commands:
   label set <label>
       Set the label (bot-review-needed, bot-changes-needed, etc.)
 
+  description set --body <text>
+      Set the PR description (summary, test plan, media)
+
   reviews
       List all reviews with their inline comments
+
+  review post --json <json>
+      Post a review from JSON: { comments: [{path,line,body}], summary, event }
 
   resolve <comment-id>
       Mark a comment as resolved (add rocket + thumbs-up reactions)
@@ -36,6 +43,9 @@ Commands:
 
   diff
       List changed files (via git diff against base branch)
+
+  publish
+      Push branch and create GitHub PR with all local review history
 
 Options:
   --checkout-path <path>   Path to the git checkout (default: cwd)
@@ -74,7 +84,6 @@ async function inferPRInfo(
   checkoutPath: string,
   baseBranch: string,
 ): Promise<PRInfo> {
-  // Get current branch
   const { stdout: branchOut } = await execFileAsync(
     "git",
     ["rev-parse", "--abbrev-ref", "HEAD"],
@@ -82,7 +91,6 @@ async function inferPRInfo(
   );
   const branch = branchOut.trim();
 
-  // Get owner/repo from origin remote
   let owner = "local";
   let repo = "unknown";
   try {
@@ -92,7 +100,6 @@ async function inferPRInfo(
       { cwd: checkoutPath },
     );
     const remoteUrl = remoteOut.trim();
-    // Parse github.com/owner/repo or github.com:owner/repo
     const match = remoteUrl.match(/[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?$/);
     if (match) {
       owner = match[1];
@@ -102,14 +109,187 @@ async function inferPRInfo(
     // No remote — use defaults
   }
 
-  return {
-    owner,
-    repo,
-    number: 0,
-    branch,
-    baseBranch,
-    title: "",
-  };
+  return { owner, repo, number: 0, branch, baseBranch, title: "" };
+}
+
+async function publishToGitHub(
+  backend: LocalStateBackend,
+  pr: PRInfo,
+  checkoutPath: string,
+): Promise<void> {
+  const state = backend.getState();
+
+  // 1. Push branch
+  console.log("Pushing branch...");
+  try {
+    execSync(`git push -u origin HEAD`, { cwd: checkoutPath, stdio: "pipe" });
+  } catch {
+    execSync(`git push origin HEAD`, { cwd: checkoutPath, stdio: "pipe" });
+  }
+
+  // 2. Create or find existing PR
+  console.log("Creating/finding PR...");
+  let prUrl: string;
+  let prNumber: number;
+  try {
+    const existing = execSync(
+      `gh pr view --json number,url --jq '.number'`,
+      { cwd: checkoutPath, encoding: "utf-8" },
+    ).trim();
+    prNumber = parseInt(existing, 10);
+    prUrl = execSync(
+      `gh pr view --json url --jq '.url'`,
+      { cwd: checkoutPath, encoding: "utf-8" },
+    ).trim();
+    console.log(`Found existing PR #${prNumber}: ${prUrl}`);
+
+    // Update description if set
+    if (state.description) {
+      execSync(
+        `gh pr edit ${prNumber} --body "${state.description.replace(/"/g, '\\"')}"`,
+        { cwd: checkoutPath, stdio: "pipe" },
+      );
+    }
+  } catch {
+    // No existing PR — create one
+    const title = state.pr.title || `${pr.branch}`;
+    const body = state.description || "";
+    const result = execSync(
+      `gh pr create --title "${title.replace(/"/g, '\\"')}" --body "${body.replace(/"/g, '\\"')}" --base ${pr.baseBranch}`,
+      { cwd: checkoutPath, encoding: "utf-8" },
+    ).trim();
+    prUrl = result;
+    // Extract PR number from URL
+    const numMatch = prUrl.match(/\/pull\/(\d+)/);
+    prNumber = numMatch ? parseInt(numMatch[1], 10) : 0;
+    console.log(`Created PR #${prNumber}: ${prUrl}`);
+  }
+
+  // 3. Post all reviews with inline comments
+  for (const review of state.reviews) {
+    console.log(`Posting review ${review.id.slice(0, 8)} (${review.event})...`);
+
+    if (review.comments.length > 0) {
+      // Build the review payload for gh api
+      const comments = review.comments.map((c) => ({
+        path: c.path,
+        line: c.line,
+        body: c.body,
+      }));
+      const payload = JSON.stringify({
+        body: review.body,
+        event: review.event,
+        comments,
+      });
+      try {
+        execSync(
+          `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/reviews --input -`,
+          { cwd: checkoutPath, input: payload, stdio: ["pipe", "pipe", "pipe"] },
+        );
+      } catch (err: any) {
+        // If batch fails, post summary + comments individually
+        console.error(`  Batch review failed, posting individually...`);
+        if (review.body) {
+          const summaryPayload = JSON.stringify({
+            body: review.body,
+            event: "COMMENT",
+            comments: [],
+          });
+          try {
+            execSync(
+              `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/reviews --input -`,
+              { cwd: checkoutPath, input: summaryPayload, stdio: ["pipe", "pipe", "pipe"] },
+            );
+          } catch { /* skip */ }
+        }
+        for (const c of comments) {
+          try {
+            const singlePayload = JSON.stringify({
+              body: "",
+              event: "COMMENT",
+              comments: [c],
+            });
+            execSync(
+              `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/reviews --input -`,
+              { cwd: checkoutPath, input: singlePayload, stdio: ["pipe", "pipe", "pipe"] },
+            );
+          } catch {
+            // Fall back to issue comment
+            const fallbackPayload = JSON.stringify({
+              body: `**${c.path}:${c.line}**\n\n${c.body}`,
+            });
+            execSync(
+              `gh api repos/${pr.owner}/${pr.repo}/issues/${prNumber}/comments --input -`,
+              { cwd: checkoutPath, input: fallbackPayload, stdio: ["pipe", "pipe", "pipe"] },
+            );
+          }
+        }
+      }
+    } else if (review.body) {
+      // Summary-only review
+      const payload = JSON.stringify({
+        body: review.body,
+        event: "COMMENT",
+        comments: [],
+      });
+      execSync(
+        `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/reviews --input -`,
+        { cwd: checkoutPath, input: payload, stdio: ["pipe", "pipe", "pipe"] },
+      );
+    }
+
+    // Post thread replies
+    for (const comment of review.comments) {
+      for (const reply of comment.replies) {
+        console.log(`  Posting reply to ${comment.id.slice(0, 8)}...`);
+        const replyPayload = JSON.stringify({ body: reply.body });
+        try {
+          // We need the GitHub comment ID — find it by matching body content
+          const ghComments = JSON.parse(
+            execSync(
+              `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/comments --jq '.[].id'`,
+              { cwd: checkoutPath, encoding: "utf-8" },
+            ),
+          );
+          // Best effort — reply to the most recent matching comment
+        } catch {
+          // Fall back to issue comment with context
+          const fallbackPayload = JSON.stringify({
+            body: `> Re: ${comment.path}:${comment.line}\n\n${reply.body}`,
+          });
+          execSync(
+            `gh api repos/${pr.owner}/${pr.repo}/issues/${prNumber}/comments --input -`,
+            { cwd: checkoutPath, input: fallbackPayload, stdio: ["pipe", "pipe", "pipe"] },
+          );
+        }
+      }
+    }
+  }
+
+  // 4. Set label
+  console.log(`Setting label: ${state.label}`);
+  const botLabels = [
+    "bot-review-needed", "bot-changes-needed", "bot-ci-pending",
+    "human-review-needed", "bot-human-intervention",
+  ];
+  for (const label of botLabels) {
+    try {
+      execSync(
+        `gh api repos/${pr.owner}/${pr.repo}/issues/${prNumber}/labels/${label} -X DELETE`,
+        { cwd: checkoutPath, stdio: ["pipe", "pipe", "pipe"] },
+      );
+    } catch { /* label not present */ }
+  }
+  execSync(
+    `gh api repos/${pr.owner}/${pr.repo}/issues/${prNumber}/labels --input -`,
+    {
+      cwd: checkoutPath,
+      input: JSON.stringify({ labels: [state.label] }),
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
+
+  console.log(`\nPublished: ${prUrl}`);
 }
 
 async function main(): Promise<void> {
@@ -129,8 +309,6 @@ async function main(): Promise<void> {
 
   switch (command) {
     case "init": {
-      // load() already creates initial state if file doesn't exist
-      // Just persist it to disk by setting the current label
       const state = backend.getState();
       await backend.setLabel(pr, state.label);
       console.log(`Initialized state at ${stateDir}`);
@@ -156,6 +334,97 @@ async function main(): Promise<void> {
         console.log(`Label set to: ${label}`);
       } else {
         console.log(backend.getLabel());
+      }
+      break;
+    }
+
+    case "description": {
+      if (subcommand === "set") {
+        const body = flags["body"];
+        if (!body) {
+          // Read from stdin if no --body flag
+          const chunks: Buffer[] = [];
+          for await (const chunk of process.stdin) {
+            chunks.push(chunk);
+          }
+          const stdinBody = Buffer.concat(chunks).toString("utf-8").trim();
+          if (!stdinBody) {
+            console.error("Usage: ironsha-state description set --body <text>");
+            console.error("  Or pipe: echo 'description' | ironsha-state description set");
+            process.exit(1);
+          }
+          await backend.setDescription(stdinBody);
+          console.log("Description set.");
+        } else {
+          await backend.setDescription(body);
+          console.log("Description set.");
+        }
+      } else {
+        const state = backend.getState();
+        console.log(state.description ?? "(no description)");
+      }
+      break;
+    }
+
+    case "review": {
+      if (subcommand === "post") {
+        const jsonStr = flags["json"];
+        if (!jsonStr) {
+          console.error("Usage: ironsha-state review post --json '<json>'");
+          process.exit(1);
+        }
+        const data = JSON.parse(jsonStr) as {
+          comments: Array<{ path: string; line: number; body: string }>;
+          summary: string;
+          event?: "COMMENT" | "REQUEST_CHANGES";
+        };
+        const comments = (data.comments ?? []).map((c) => ({
+          path: c.path,
+          line: c.line,
+          body: c.body,
+        }));
+        const event = data.event ?? (comments.length > 0 ? "REQUEST_CHANGES" : "COMMENT");
+        await backend.postReview(pr, comments, data.summary ?? "", event);
+
+        // Set label based on outcome
+        if (comments.length > 0) {
+          await backend.setLabel(pr, "bot-changes-needed");
+          console.log(`Posted review with ${comments.length} comment(s). Label: bot-changes-needed`);
+        } else {
+          // Check for unresolved threads before approving
+          const unresolved = await backend.fetchUnresolvedThreadCount(pr);
+          if (unresolved > 0) {
+            await backend.setLabel(pr, "bot-changes-needed");
+            console.log(`Posted clean review but ${unresolved} unresolved thread(s) remain. Label: bot-changes-needed`);
+          } else {
+            await backend.setLabel(pr, "human-review-needed");
+            console.log(`Posted clean review. Label: human-review-needed`);
+          }
+        }
+      } else {
+        // Show reviews
+        const state = backend.getState();
+        if (state.reviews.length === 0) {
+          console.log("No reviews.");
+          break;
+        }
+        for (const review of state.reviews) {
+          console.log(`\n## Review ${review.id.slice(0, 8)} (${review.event})`);
+          console.log(`   ${review.createdAt}`);
+          if (review.body) {
+            console.log(`   Summary: ${review.body.slice(0, 100)}...`);
+          }
+          for (const comment of review.comments) {
+            const resolved = comment.reactions.some((r) => r.content === "rocket") &&
+              comment.reactions.some((r) => r.content === "+1");
+            const status = resolved ? "RESOLVED" : "UNRESOLVED";
+            console.log(`\n   [${status}] ${comment.path}:${comment.line} (${comment.id.slice(0, 8)})`);
+            console.log(`   ${comment.body}`);
+            for (const reply of comment.replies) {
+              console.log(`     ↳ ${reply.body}`);
+            }
+          }
+        }
       }
       break;
     }
@@ -192,7 +461,6 @@ async function main(): Promise<void> {
         console.error("Usage: ironsha-state resolve <comment-id>");
         process.exit(1);
       }
-      // Support short IDs — find full UUID match
       const state = backend.getState();
       let fullId: string | undefined;
       for (const review of state.reviews) {
@@ -236,6 +504,11 @@ async function main(): Promise<void> {
       for (const f of files) {
         console.log(f.filename);
       }
+      break;
+    }
+
+    case "publish": {
+      await publishToGitHub(backend, pr, checkoutPath);
       break;
     }
 

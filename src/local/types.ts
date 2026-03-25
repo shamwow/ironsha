@@ -45,6 +45,7 @@ export interface LocalPRState {
   pr: PRInfo;
   label: BotLabel;
   checkoutPath: string;
+  description?: string;
   reviews: LocalReview[];
   createdAt: string;
   updatedAt: string;

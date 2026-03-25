@@ -448,3 +448,8 @@
 {"level":30,"time":1774406089443,"pid":36649,"hostname":"Ironshas-Mini.lan","path":"src/unknown.ts","line":5,"msg":"Comment file not in diff, converting to general comment"}
 {"level":30,"time":1774406089443,"pid":36649,"hostname":"Ironshas-Mini.lan","path":"src/foo.ts","line":50,"msg":"Comment line not in diff, converting to general comment"}
 {"level":30,"time":1774406089443,"pid":36649,"hostname":"Ironshas-Mini.lan","path":"nope.ts","line":1,"msg":"Comment file not in diff, converting to general comment"}
+{"level":30,"time":1774407860513,"pid":36936,"hostname":"Ironshas-Mini.lan","path":"src/foo.ts","originalLine":16,"snappedLine":14,"msg":"Snapped comment to nearest diff line"}
+{"level":30,"time":1774407860513,"pid":36936,"hostname":"Ironshas-Mini.lan","path":"src/foo.ts","line":100,"msg":"Comment line not in diff, converting to general comment"}
+{"level":30,"time":1774407860513,"pid":36936,"hostname":"Ironshas-Mini.lan","path":"src/unknown.ts","line":5,"msg":"Comment file not in diff, converting to general comment"}
+{"level":30,"time":1774407860513,"pid":36936,"hostname":"Ironshas-Mini.lan","path":"src/foo.ts","line":50,"msg":"Comment line not in diff, converting to general comment"}
+{"level":30,"time":1774407860513,"pid":36936,"hostname":"Ironshas-Mini.lan","path":"nope.ts","line":1,"msg":"Comment file not in diff, converting to general comment"}
