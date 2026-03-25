@@ -310,10 +310,12 @@ async function publishToGitHub(
     let ghComments: Array<{ id: number; path: string; line: number | null; body: string }> = [];
     try {
       const commentsJson = execSync(
-        `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/comments --paginate --slurp --jq '[.[][] | {id, path, line, body}]'`,
+        `gh api repos/${pr.owner}/${pr.repo}/pulls/${prNumber}/comments --paginate`,
         { cwd: checkoutPath, encoding: "utf-8", ...ghEnv },
       );
-      ghComments = JSON.parse(commentsJson);
+      // --paginate concatenates JSON arrays: [...][...] — merge into one array
+      const raw = commentsJson.trim();
+      ghComments = JSON.parse(raw.replace(/\]\s*\[/g, ","));
     } catch {
       console.error("  Could not fetch PR comments for reaction matching.");
     }
