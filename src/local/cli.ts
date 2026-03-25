@@ -25,10 +25,11 @@ function resolveCommentId(
   backend: LocalStateBackend,
   partialId: string,
 ): string | undefined {
+  const trimmed = partialId.trim();
   const state = backend.getState();
   for (const review of state.reviews) {
     for (const comment of review.comments) {
-      if (comment.id === partialId || comment.id.startsWith(partialId)) {
+      if (comment.id === trimmed || comment.id.startsWith(trimmed)) {
         return comment.id;
       }
     }
@@ -163,12 +164,12 @@ async function publishToGitHub(
     ? { env: { ...process.env, GH_TOKEN: ghToken } }
     : {};
 
-  // 1. Push branch
+  // 1. Push branch (uses git's own auth — SSH keys or credential helpers, not GH_TOKEN)
   console.log("Pushing branch...");
   try {
-    execSync(`git push -u origin HEAD`, { cwd: checkoutPath, stdio: "pipe", ...ghEnv });
+    execSync(`git push -u origin HEAD`, { cwd: checkoutPath, stdio: "pipe" });
   } catch {
-    execSync(`git push origin HEAD`, { cwd: checkoutPath, stdio: "pipe", ...ghEnv });
+    execSync(`git push origin HEAD`, { cwd: checkoutPath, stdio: "pipe" });
   }
 
   // 2. Create or find existing PR
@@ -300,7 +301,9 @@ async function publishToGitHub(
     }
   }
 
-  // 4. Post resolved reactions
+  // 4. Post resolved reactions on PR review comments.
+  // Note: replies above go to issue comments (different API), so their footer
+  // tags won't appear in the PR review comments fetched here — no collision risk.
   const resolvedIds = await backend.fetchResolvedThreadIds(pr);
   if (resolvedIds.size > 0) {
     console.log(`Posting reactions for ${resolvedIds.size} resolved comment(s)...`);
