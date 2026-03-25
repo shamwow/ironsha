@@ -263,7 +263,7 @@ async function runPrintMode(llm: LlmConfig, prompt: string, cwd: string, phase: 
 }
 
 /**
- * Run an LLM in agentic mode: pipe prompt via stdin, stream stdout to user's stderr.
+ * Run an LLM in agentic mode: pipe prompt via stdin and capture output in transcripts.
  */
 async function runAgenticMode(llm: LlmConfig, prompt: string, cwd: string, phase: string = "agentic"): Promise<string> {
   const spec = await buildProviderInvocation({
@@ -282,14 +282,11 @@ async function runAgenticMode(llm: LlmConfig, prompt: string, cwd: string, phase
       env: spec.env,
       stdio: ["pipe", "pipe", "pipe"],
     });
-    const collector = new ProviderOutputCollector(spec, true);
+    const collector = new ProviderOutputCollector(spec, false);
 
     child.stdout.on("data", (data: Buffer) => {
       transcript.stdout.write(data);
-      const streamed = collector.handleStdout(data);
-      if (streamed) {
-        process.stderr.write(streamed);
-      }
+      collector.handleStdout(data);
       if (collector.shouldAbortForProviderFailure()) {
         child.kill("SIGTERM");
       }
