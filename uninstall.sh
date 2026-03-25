@@ -1,14 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# --- Agents ---
-for agent in implement plan; do
-  rm -f "${HOME}/.claude/agents/$agent.md"
-  echo "Removed $agent agent"
-done
-
 # --- Commands ---
-for cmd in learn save load; do
+for cmd in learn save load ironsha-local; do
   rm -f "${HOME}/.claude/commands/$cmd.md"
   echo "Removed /$cmd command"
 done

@@ -3,14 +3,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# --- Agents ---
-CLAUDE_AGENT_DIR="${HOME}/.claude/agents"
-mkdir -p "$CLAUDE_AGENT_DIR"
-for agent in implement plan; do
-  ln -sf "$SCRIPT_DIR/.claude/agents/$agent.md" "$CLAUDE_AGENT_DIR/$agent.md"
-  echo "Installed $agent agent → $CLAUDE_AGENT_DIR/$agent.md (symlink)"
-done
-
 # --- Commands ---
 CLAUDE_CMD_DIR="${HOME}/.claude/commands"
 mkdir -p "$CLAUDE_CMD_DIR"
@@ -26,9 +18,6 @@ ln -sf "$SCRIPT_DIR/scripts/lessons-query-check.sh" "$CLAUDE_SCRIPT_DIR/lessons-
 echo "Installed lessons-query-check.sh → $CLAUDE_SCRIPT_DIR/lessons-query-check.sh (symlink)"
 ln -sf "$SCRIPT_DIR/scripts/lessons-use-check.sh" "$CLAUDE_SCRIPT_DIR/lessons-use-check.sh"
 echo "Installed lessons-use-check.sh → $CLAUDE_SCRIPT_DIR/lessons-use-check.sh (symlink)"
-ln -sf "$SCRIPT_DIR/scripts/pr-review-check.sh" "$CLAUDE_SCRIPT_DIR/pr-review-check.sh"
-echo "Installed pr-review-check.sh → $CLAUDE_SCRIPT_DIR/pr-review-check.sh (symlink)"
-
 # Clean up old hook names
 rm -f "$CLAUDE_SCRIPT_DIR/stop-hook.sh" "$CLAUDE_SCRIPT_DIR/revision-hook.sh"
 
@@ -50,11 +39,10 @@ else
   echo "Warning: qmd not found — lesson search will not work. Install qmd and re-run."
 fi
 
-# Add Stop hooks to enforce lesson lookup, revision, and PR review
+# Add Stop hooks to enforce lesson lookup and revision
 CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
 QUERY_HOOK_CMD="${CLAUDE_SCRIPT_DIR}/lessons-query-check.sh"
 USE_HOOK_CMD="${CLAUDE_SCRIPT_DIR}/lessons-use-check.sh"
-PR_REVIEW_HOOK_CMD="${CLAUDE_SCRIPT_DIR}/pr-review-check.sh"
 
 if command -v jq &>/dev/null; then
   # Create settings.json if it doesn't exist
@@ -62,7 +50,7 @@ if command -v jq &>/dev/null; then
 
   # Remove any existing lesson-related Stop hooks, then add both
   TMPFILE=$(mktemp)
-  jq --arg query_cmd "$QUERY_HOOK_CMD" --arg use_cmd "$USE_HOOK_CMD" --arg pr_cmd "$PR_REVIEW_HOOK_CMD" '
+  jq --arg query_cmd "$QUERY_HOOK_CMD" --arg use_cmd "$USE_HOOK_CMD" '
     .hooks //= {} |
     .hooks.Stop //= [] |
     .hooks.Stop = [.hooks.Stop[] | select(.hooks | all(
@@ -80,22 +68,15 @@ if command -v jq &>/dev/null; then
           "type": "command",
           "command": $use_cmd
         }]
-      },
-      {
-        "hooks": [{
-          "type": "command",
-          "command": $pr_cmd
-        }]
       }
     ]
   ' "$CLAUDE_SETTINGS" > "$TMPFILE" && mv "$TMPFILE" "$CLAUDE_SETTINGS"
-  echo "Installed Stop hooks for lesson lookup, revision, and PR review enforcement in $CLAUDE_SETTINGS"
+  echo "Installed Stop hooks for lesson lookup and revision in $CLAUDE_SETTINGS"
 else
   echo "Warning: jq not found — could not install Stop hooks. Install jq and re-run, or manually add the hooks to $CLAUDE_SETTINGS"
 fi
 
 echo ""
 echo "Done. Available:"
-echo "  Agents:   implement, plan"
-echo "  Commands: /learn, /save, /load"
+echo "  Commands: /learn, /save, /load, /ironsha-local"
 echo "  Lessons:  qmd query (searches .lessons/)"
