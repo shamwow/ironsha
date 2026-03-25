@@ -314,7 +314,7 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
     const fixture = createIntegrationFixture(runId);
     fixtures.push(fixture);
 
-    const cliPath = join(process.cwd(), "dist", "cli.js");
+    const cliPath = join(import.meta.dirname, "..", "cli.js");
     const env = {
       ...process.env,
       PATH: `${fixture.mockBinPath}:${process.env.PATH ?? ""}`,
@@ -322,7 +322,7 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
     };
 
     execFileSync(
-      "node",
+      process.execPath,
       [
         cliPath,
         "Complete the task in src/task.txt and open a PR",

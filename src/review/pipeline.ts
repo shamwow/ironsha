@@ -119,7 +119,7 @@ export async function runReviewPipelineCore(
     log.info({ platform: detectedPlatform }, "Detected platform");
 
     // 3. Build prompt files and MCP config
-    const provider = "claude" as const;
+    const provider = config.REVIEW_PROVIDER;
     const model = resolveProviderModel(provider);
     const archPromptPath = buildPromptFile({
       pass: "architecture-pass",

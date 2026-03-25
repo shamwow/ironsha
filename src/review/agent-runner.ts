@@ -4,6 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { config, resolveProviderModel, type AgentProvider } from "../config.js";
 import { logger } from "../logger.js";
+import {
+  buildProviderInput,
+  buildProviderInvocation,
+  ProviderOutputCollector,
+  type BuildProviderInvocationOptions,
+  type ProviderInvocationSpec,
+} from "../llm/provider-runtime.js";
 
 export interface RunAgentOptions {
   provider: AgentProvider;
@@ -19,21 +26,6 @@ export interface RunAgentOptions {
   skipMcpGithub?: boolean;
 }
 
-interface ClaudeInvocationOptions {
-  promptPath: string;
-  mcpConfigPath?: string;
-  model: string;
-  maxTurns: number;
-}
-
-interface InvocationSpec {
-  command: string;
-  args: string[];
-  env: NodeJS.ProcessEnv;
-  cleanupPaths: string[];
-  resolvedModel?: string;
-}
-
 interface TranscriptMetadata {
   provider: AgentProvider;
   resolvedModel: string | null;
@@ -43,68 +35,7 @@ interface TranscriptMetadata {
 }
 
 export function providerDisplayName(_provider: AgentProvider): string {
-  return "Claude Code";
-}
-
-export function buildClaudeInvocation(
-  options: ClaudeInvocationOptions,
-): InvocationSpec {
-  const { promptPath, mcpConfigPath, model, maxTurns } = options;
-
-  const args = [
-    "--print",
-    "--output-format",
-    "json",
-    "--model",
-    model,
-    "--max-turns",
-    String(maxTurns),
-    "--thinking",
-    "enabled",
-    "--append-system-prompt-file",
-    promptPath,
-  ];
-
-  if (mcpConfigPath) {
-    args.push("--mcp-config", mcpConfigPath);
-  }
-
-  args.push("--dangerously-skip-permissions");
-
-  return {
-    command: "claude",
-    args,
-    env: {
-      ...process.env,
-      CLAUDECODE: "",
-      ...(process.env.ANTHROPIC_API_KEY
-        ? { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY }
-        : {}),
-    },
-    cleanupPaths: mcpConfigPath ? [mcpConfigPath] : [],
-    resolvedModel: model,
-  };
-}
-
-async function createClaudeMcpConfig(token: string): Promise<string> {
-  const mcpConfig = {
-    mcpServers: {
-      github: {
-        type: "stdio",
-        command: "npx",
-        args: ["-y", "@github/mcp-server"],
-        env: {
-          GITHUB_PERSONAL_ACCESS_TOKEN: token,
-        },
-      },
-    },
-  };
-
-  const tempDir = join(tmpdir(), "ironsha-mcp");
-  await mkdir(tempDir, { recursive: true });
-  const tempPath = join(tempDir, `mcp-config-${Date.now()}.json`);
-  await writeFile(tempPath, JSON.stringify(mcpConfig, null, 2));
-  return tempPath;
+  return _provider === "codex" ? "Codex" : "Claude Code";
 }
 
 async function saveTranscript(
@@ -179,17 +110,19 @@ async function cleanupInvocationFiles(paths: string[]): Promise<void> {
 
 async function buildInvocationSpec(
   options: RunAgentOptions,
-): Promise<InvocationSpec> {
+): Promise<ProviderInvocationSpec> {
   const resolvedModel = resolveProviderModel(options.provider);
-  const mcpConfigPath = options.skipMcpGithub
-    ? undefined
-    : await createClaudeMcpConfig(options.githubToken);
-  return buildClaudeInvocation({
-    promptPath: options.promptPath,
-    mcpConfigPath,
+  const invocationOptions: BuildProviderInvocationOptions = {
+    provider: options.provider,
     model: resolvedModel,
+    mode: "review",
+    promptPath: options.promptPath,
     maxTurns: options.maxTurns,
-  });
+  };
+  if (!options.skipMcpGithub && options.provider === "claude") {
+    invocationOptions.githubToken = options.githubToken;
+  }
+  return buildProviderInvocation(invocationOptions);
 }
 
 export type AgentRunner = (options: RunAgentOptions) => Promise<string>;
@@ -207,14 +140,18 @@ export async function runAgent(
       env: invocation.env,
       stdio: ["pipe", "pipe", "pipe"],
     });
-
-    let stdout = "";
-    let stderr = "";
+    const collector = new ProviderOutputCollector(invocation, false);
     let settled = false;
 
-    const finalize = async (handler: () => void): Promise<void> => {
+    const finalize = async (
+      handler: (context: { stdout: string; stderr: string; finalOutput: string }) => void,
+    ): Promise<void> => {
       if (settled) return;
       settled = true;
+
+      const finalOutput = await collector.finalize();
+      const stdout = collector.getStdout();
+      const stderr = collector.getStderr();
 
       try {
         await saveTranscript(
@@ -238,24 +175,24 @@ export async function runAgent(
         void pruneTranscripts().catch((err) => {
           logger.warn({ err }, "Failed to prune transcripts");
         });
-        handler();
+        handler({ stdout, stderr, finalOutput });
       }
     };
 
     child.stdout.on("data", (data: Buffer) => {
-      stdout += data.toString();
+      collector.handleStdout(data);
     });
 
     child.stderr.on("data", (data: Buffer) => {
-      stderr += data.toString();
+      collector.handleStderr(data);
     });
 
-    child.stdin.write(options.userMessage);
+    child.stdin.write(buildProviderInput(invocation, options.userMessage));
     child.stdin.end();
 
     const timer = setTimeout(() => {
       child.kill("SIGTERM");
-      void finalize(() => {
+      void finalize(({ stderr }) => {
         reject(
           new Error(`${displayName} timed out after ${options.timeoutMs}ms\nstderr: ${stderr}`),
         );
@@ -264,15 +201,15 @@ export async function runAgent(
 
     child.on("close", (code) => {
       clearTimeout(timer);
-      void finalize(() => {
+      void finalize(({ stdout, stderr, finalOutput }) => {
         if (code === 0) {
-          resolve(stdout);
+          resolve(finalOutput);
           return;
         }
 
         reject(
           new Error(
-            `${displayName} exited with code ${code}\nstderr: ${stderr}\nstdout: ${stdout}`,
+            `${displayName} exited with code ${code}\nstderr: ${stderr}\nstdout: ${stdout}\noutput: ${finalOutput}`,
           ),
         );
       });

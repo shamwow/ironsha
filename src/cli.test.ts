@@ -29,3 +29,19 @@ test("formatSubprocessFailure includes stderr and output for generic failures", 
   assert.match(message, /stderr: something on stderr/);
   assert.match(message, /output: some tool output/);
 });
+
+test("formatSubprocessFailure surfaces repeated Claude api retries as usage exhaustion", () => {
+  const message = formatSubprocessFailure(
+    "claude",
+    1,
+    "",
+    [
+      '{"type":"system","subtype":"api_retry","attempt":1,"error":"unknown"}',
+      '{"type":"system","subtype":"api_retry","attempt":2,"error":"unknown"}',
+      '{"type":"system","subtype":"api_retry","attempt":3,"error":"unknown"}',
+    ].join("\n"),
+  );
+
+  assert.match(message, /claude could not complete the request/i);
+  assert.match(message, /usage is exhausted|provider is temporarily unavailable/i);
+});

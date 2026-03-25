@@ -4,13 +4,19 @@ import { createWriteStream, readFileSync, writeFileSync, mkdirSync, existsSync }
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { runBuildAndTests } from "./review/build-runner.js";
+import {
+  buildProviderInput,
+  buildProviderInvocation,
+  ProviderOutputCollector,
+} from "./llm/provider-runtime.js";
+import type { AgentProvider } from "./config.js";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 interface LlmConfig {
-  provider: "claude" | "codex";
+  provider: AgentProvider;
   model: string;
 }
 
@@ -138,38 +144,6 @@ function parseArgs(argv: string[]): OrchestrateOptions {
 // Subprocess Helpers
 // ---------------------------------------------------------------------------
 
-function buildClaudeArgs(model: string, _mode: "print" | "agentic"): string[] {
-  return [
-    "--print", "--verbose", "--model", model,
-    "--thinking", "enabled",
-    "--output-format", "stream-json",
-    "--max-turns", String(MAX_TURNS),
-    "--dangerously-skip-permissions",
-  ];
-}
-
-function buildCodexArgs(model: string, mode: "print" | "agentic"): string[] {
-  if (mode === "print") {
-    return ["--model", model, "--quiet"];
-  }
-  return ["--model", model, "--full-auto"];
-}
-
-function buildInvocation(llm: LlmConfig, mode: "print" | "agentic"): { command: string; args: string[] } {
-  if (llm.provider === "claude") {
-    return { command: "claude", args: buildClaudeArgs(llm.model, mode) };
-  }
-  return { command: "codex", args: buildCodexArgs(llm.model, mode) };
-}
-
-function buildEnv(): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
-    CLAUDECODE: "",
-    ...(process.env.ANTHROPIC_API_KEY ? { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY } : {}),
-  };
-}
-
 function llmLabel(llm: LlmConfig): string {
   return `${llm.provider}:${llm.model}`;
 }
@@ -202,68 +176,6 @@ function openTranscriptStreams(phase: string): { stdoutPath: string; stdout: Ret
   };
 }
 
-interface StreamJsonExtraction {
-  /** Text from assistant message content blocks */
-  text: string | null;
-  /** Text from the result event (used as fallback) */
-  resultText: string | null;
-}
-
-/**
- * Extract text content from a stream-json line.
- */
-function extractFromStreamJson(line: string): StreamJsonExtraction {
-  if (!line.trim()) return { text: null, resultText: null };
-  try {
-    const event = JSON.parse(line);
-    // Assistant message with text content
-    if (event.type === "assistant" && event.message?.content) {
-      const parts: string[] = [];
-      for (const block of event.message.content) {
-        if (block.type === "text") {
-          parts.push(block.text);
-        }
-      }
-      if (parts.length > 0) return { text: parts.join(""), resultText: null };
-    }
-    // Result message (final output) — may duplicate assistant text, so tracked separately
-    if (event.type === "result" && event.result) {
-      const resultStr = typeof event.result === "string"
-        ? event.result
-        : (event.result as Array<{ type: string; text?: string }>)
-            .filter((b) => b.type === "text")
-            .map((b) => b.text ?? "")
-            .join("");
-      if (resultStr) return { text: null, resultText: resultStr };
-    }
-  } catch {
-    // Not valid JSON — ignore
-  }
-  return { text: null, resultText: null };
-}
-
-interface ProcessedBuffer {
-  text: string;
-  resultText: string;
-  remainder: string;
-}
-
-/**
- * Process a raw stdout buffer that may contain partial lines.
- */
-function processStreamBuffer(buffer: string): ProcessedBuffer {
-  const lines = buffer.split("\n");
-  const remainder = lines.pop() ?? "";
-  let text = "";
-  let resultText = "";
-  for (const line of lines) {
-    const extracted = extractFromStreamJson(line);
-    if (extracted.text) text += extracted.text;
-    if (extracted.resultText) resultText += extracted.resultText;
-  }
-  return { text, resultText, remainder };
-}
-
 export function formatSubprocessFailure(
   command: string,
   code: number | null,
@@ -273,6 +185,16 @@ export function formatSubprocessFailure(
   const stderrText = stderr.trim();
   const outputText = output.trim();
   const combined = `${stderrText}\n${outputText}`;
+  const claudeRetryCount = (combined.match(/"subtype":"api_retry"/g) ?? []).length;
+
+  if (command === "claude" && claudeRetryCount >= 3) {
+    return [
+      "claude could not complete the request after repeated API retries.",
+      "This usually means your Claude usage is exhausted or the provider is temporarily unavailable.",
+      "Check your Claude usage/quota and retry later.",
+    ].join("\n");
+  }
+
   if (/You've hit your limit|rate[_ ]limit/i.test(combined)) {
     const detail = outputText || stderrText || "Provider rate limit reached.";
     return `${command} hit provider rate limits.\n${detail}`;
@@ -288,54 +210,52 @@ export function formatSubprocessFailure(
  * Run an LLM in print mode: pipe prompt via stdin, capture and return stdout.
  */
 async function runPrintMode(llm: LlmConfig, prompt: string, cwd: string, phase: string = "print"): Promise<string> {
-  const { command, args } = buildInvocation(llm, "print");
+  const spec = await buildProviderInvocation({
+    provider: llm.provider,
+    model: llm.model,
+    mode: "print",
+    maxTurns: MAX_TURNS,
+  });
   const transcript = openTranscriptStreams(phase);
-  log("SUBPROCESS", `${command} ${args.join(" ")}`);
+  log("SUBPROCESS", `${spec.command} ${spec.args.join(" ")}`);
   log("SUBPROCESS", `Transcript: ${transcript.stdoutPath}`);
 
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = spawn(spec.command, spec.args, {
       cwd,
-      env: buildEnv(),
+      env: spec.env,
       stdio: ["pipe", "pipe", "pipe"],
     });
-
-    let textContent = "";
-    let resultContent = "";
-    let lineBuffer = "";
-    let stderr = "";
+    const collector = new ProviderOutputCollector(spec, false);
 
     child.stdout.on("data", (data: Buffer) => {
       transcript.stdout.write(data);
-      lineBuffer += data.toString();
-      const { text, resultText, remainder } = processStreamBuffer(lineBuffer);
-      lineBuffer = remainder;
-      textContent += text;
-      resultContent += resultText;
+      collector.handleStdout(data);
     });
-    child.stderr.on("data", (data: Buffer) => { stderr += data.toString(); transcript.stderr.write(data); });
+    child.stderr.on("data", (data: Buffer) => {
+      collector.handleStderr(data);
+      transcript.stderr.write(data);
+    });
 
-    child.stdin.write(prompt);
+    child.stdin.write(buildProviderInput(spec, prompt));
     child.stdin.end();
 
-    child.on("close", (code) => {
-      if (lineBuffer) {
-        const extracted = extractFromStreamJson(lineBuffer);
-        if (extracted.text) textContent += extracted.text;
-        if (extracted.resultText) resultContent += extracted.resultText;
-      }
+    child.on("close", async (code) => {
+      const output = await collector.finalize();
+      await collector.cleanup();
       transcript.stdout.end();
       transcript.stderr.end();
-      // Use assistant text if available, fall back to result text
-      const output = textContent || resultContent;
       if (code === 0) {
         resolve(output);
       } else {
-        reject(new Error(formatSubprocessFailure(command, code, stderr, output)));
+        reject(new Error(formatSubprocessFailure(spec.command, code, collector.getStderr(), output)));
       }
     });
 
-    child.on("error", (err) => reject(err));
+    child.on("error", async (err) => {
+      await collector.cleanup();
+      reject(err);
+    });
   });
 }
 
@@ -343,57 +263,55 @@ async function runPrintMode(llm: LlmConfig, prompt: string, cwd: string, phase: 
  * Run an LLM in agentic mode: pipe prompt via stdin, stream stdout to user's stderr.
  */
 async function runAgenticMode(llm: LlmConfig, prompt: string, cwd: string, phase: string = "agentic"): Promise<string> {
-  const { command, args } = buildInvocation(llm, "agentic");
+  const spec = await buildProviderInvocation({
+    provider: llm.provider,
+    model: llm.model,
+    mode: "agentic",
+    maxTurns: MAX_TURNS,
+  });
   const transcript = openTranscriptStreams(phase);
-  log("SUBPROCESS", `${command} ${args.join(" ")}`);
+  log("SUBPROCESS", `${spec.command} ${spec.args.join(" ")}`);
   log("SUBPROCESS", `Transcript: ${transcript.stdoutPath}`);
 
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = spawn(spec.command, spec.args, {
       cwd,
-      env: buildEnv(),
+      env: spec.env,
       stdio: ["pipe", "pipe", "pipe"],
     });
-
-    let textContent = "";
-    let resultContent = "";
-    let lineBuffer = "";
-    let stderr = "";
+    const collector = new ProviderOutputCollector(spec, true);
 
     child.stdout.on("data", (data: Buffer) => {
       transcript.stdout.write(data);
-      lineBuffer += data.toString();
-      const { text, resultText, remainder } = processStreamBuffer(lineBuffer);
-      lineBuffer = remainder;
-      if (text) {
-        textContent += text;
+      const streamed = collector.handleStdout(data);
+      if (streamed) {
+        process.stderr.write(streamed);
       }
-      if (resultText) resultContent += resultText;
     });
-    child.stderr.on("data", (data: Buffer) => { stderr += data.toString(); transcript.stderr.write(data); });
+    child.stderr.on("data", (data: Buffer) => {
+      collector.handleStderr(data);
+      transcript.stderr.write(data);
+    });
 
-    child.stdin.write(prompt);
+    child.stdin.write(buildProviderInput(spec, prompt));
     child.stdin.end();
 
-    child.on("close", (code) => {
-      if (lineBuffer) {
-        const extracted = extractFromStreamJson(lineBuffer);
-        if (extracted.text) {
-          textContent += extracted.text;
-        }
-        if (extracted.resultText) resultContent += extracted.resultText;
-      }
+    child.on("close", async (code) => {
+      const output = await collector.finalize();
+      await collector.cleanup();
       transcript.stdout.end();
       transcript.stderr.end();
-      const output = textContent || resultContent;
       if (code === 0) {
         resolve(output);
       } else {
-        reject(new Error(formatSubprocessFailure(command, code, stderr, output)));
+        reject(new Error(formatSubprocessFailure(spec.command, code, collector.getStderr(), output)));
       }
     });
 
-    child.on("error", (err) => reject(err));
+    child.on("error", async (err) => {
+      await collector.cleanup();
+      reject(err);
+    });
   });
 }
 
@@ -592,7 +510,7 @@ function runStateCmd(cwd: string, stateArgs: string): string {
   return execSync(`node "${cliPath}" ${stateArgs}`, {
     cwd,
     encoding: "utf-8",
-    env: buildEnv(),
+    env: process.env,
     stdio: ["pipe", "pipe", "pipe"],
   }).trim();
 }

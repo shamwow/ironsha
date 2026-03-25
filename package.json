@@ -6,9 +6,9 @@
     "ironsha": "dist/main.js"
   },
   "scripts": {
-    "build": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
+    "build": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\" && tsc && node -e \"require('fs').chmodSync('dist/main.js', 0o755)\"",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test dist/*.test.js dist/**/*.test.js",
+    "test": "npm run build && node --test dist/*.test.js dist/github/*.test.js dist/prompts/*.test.js dist/review/*.test.js dist/llm/*.test.js",
     "test:integration": "npm run build && node --test --test-timeout=900000 dist/integration/*.integration.test.js",
     "test:integration:mock_llm": "npm run build && node --test --test-timeout=900000 dist/integration/*.integration.test.js"
   },

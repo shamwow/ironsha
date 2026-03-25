@@ -11,6 +11,8 @@ test("readConfig defaults", () => {
   } as NodeJS.ProcessEnv);
 
   assert.equal(appConfig.CLAUDE_MODEL, "claude-opus-4-6");
+  assert.equal(appConfig.CODEX_MODEL, "gpt-5.4");
+  assert.equal(appConfig.REVIEW_PROVIDER, "claude");
 });
 
 test("resolveProviderModel returns the configured Claude model", () => {
@@ -20,4 +22,13 @@ test("resolveProviderModel returns the configured Claude model", () => {
   } as NodeJS.ProcessEnv);
 
   assert.equal(resolveProviderModel("claude", appConfig), "claude-sonnet-4-6");
+});
+
+test("resolveProviderModel returns the configured Codex model", () => {
+  const appConfig = readConfig({
+    GITHUB_TOKEN: "gh-token",
+    CODEX_MODEL: "gpt-5.4",
+  } as NodeJS.ProcessEnv);
+
+  assert.equal(resolveProviderModel("codex", appConfig), "gpt-5.4");
 });
