@@ -229,6 +229,9 @@ Commands:
   review post --phase <code|qa> --json <json>
       Post a review from JSON: { comments: [{path,line,body}], event }
 
+  review reset --phase <code|qa>
+      Clear persisted local review comments for a phase and remove its pass label
+
   resolve <comment-id>
       Mark a comment as resolved (add rocket + thumbs-up reactions)
 
@@ -721,6 +724,19 @@ export async function main(argv: string[] = process.argv): Promise<void> {
 
     case "reviews":
     case "review": {
+      if (subcommand === "reset") {
+        const phase = parseReviewPhase(flags["phase"]);
+        if (!phase) {
+          console.error("Usage: ironsha-state review reset --phase <code|qa>");
+          process.exit(1);
+        }
+        const passLabel = passLabelForPhase(phase);
+        await backend.clearReviews(pr, phase);
+        await backend.removePassLabel(pr, passLabel);
+        console.log(`Reset ${phase} reviews and cleared pass label: ${passLabel}`);
+        break;
+      }
+
       if (command === "reviews" || subcommand !== "post") {
         // Display reviews
         const state = backend.getState();

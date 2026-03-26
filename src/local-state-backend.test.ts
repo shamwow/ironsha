@@ -91,3 +91,31 @@ test("LocalStateBackend filters unresolved threads by review phase", async () =>
     rmSync(checkoutPath, { recursive: true, force: true });
   }
 });
+
+test("LocalStateBackend clears reviews for only the requested phase", async () => {
+  const { backend, pr, checkoutPath } = createBackend();
+  try {
+    await backend.postReview(
+      pr,
+      [{ path: "src/code.txt", line: 1, body: "Code issue." }],
+      "REQUEST_CHANGES",
+      "code",
+    );
+    await backend.postReview(
+      pr,
+      [{ path: null, line: null, body: "QA issue." }],
+      "REQUEST_CHANGES",
+      "qa",
+    );
+
+    await backend.clearReviews(pr, "qa");
+
+    const state = backend.getState();
+    assert.equal(state.reviews.length, 1);
+    assert.equal(state.reviews[0].phase, "code");
+    assert.equal(await backend.fetchUnresolvedThreadCount(pr, "code"), 1);
+    assert.equal(await backend.fetchUnresolvedThreadCount(pr, "qa"), 0);
+  } finally {
+    rmSync(checkoutPath, { recursive: true, force: true });
+  }
+});

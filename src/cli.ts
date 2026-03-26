@@ -21,7 +21,9 @@ interface LlmConfig {
 }
 
 interface OrchestrateOptions {
+  command: "build" | "resume";
   task: string;
+  worktreeName?: string;
   planFile?: string;
   planLlm: LlmConfig;
   planReviewLlm: LlmConfig;
@@ -38,6 +40,25 @@ interface OrchestrateOptions {
   skipCodeReview: boolean;
 }
 
+type WorkflowStep =
+  | "plan"
+  | "plan-review"
+  | "qa-plan-review"
+  | "implement"
+  | "code-review"
+  | "qa-review"
+  | "publish"
+  | "done";
+
+interface WorkflowExecutionOptions {
+  skipPlan: boolean;
+  skipPlanReview: boolean;
+  skipPlanQaReview: boolean;
+  skipImplement: boolean;
+  skipCodeReview: boolean;
+  skipQaReview: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -46,7 +67,20 @@ const DEFAULT_LLM: LlmConfig = { provider: "claude", model: "claude-opus-4-6" };
 const VALID_PROVIDERS = ["claude", "codex"] as const;
 const MAX_TURNS = 50;
 
-const USAGE = `Usage: ironsha build "<task description>" [options]
+const WORKFLOW_STEPS: WorkflowStep[] = [
+  "plan",
+  "plan-review",
+  "qa-plan-review",
+  "implement",
+  "code-review",
+  "qa-review",
+  "publish",
+];
+
+const USAGE = `Usage:
+  ironsha build "<task description>" [options]
+  ironsha resume <worktree-name> [options]
+  ironsha "<task description>" [options]
 
 Options:
   --global-llm <provider:model>     LLM for all phases unless overridden per phase
@@ -104,7 +138,13 @@ function parseLlm(value: string): LlmConfig {
 }
 
 export function parseArgs(argv: string[]): OrchestrateOptions {
-  const args = argv.slice(2);
+  const rawArgs = argv.slice(2);
+  const command = rawArgs[0] === "build" || rawArgs[0] === "resume"
+    ? rawArgs[0]
+    : "build";
+  const args = rawArgs[0] === command && (command === "build" || command === "resume")
+    ? rawArgs.slice(1)
+    : rawArgs;
   const flags: Record<string, string> = {};
   const boolFlags = new Set<string>();
   const positional: string[] = [];
@@ -128,9 +168,42 @@ export function parseArgs(argv: string[]): OrchestrateOptions {
     }
   }
 
-  const task = positional[0] ?? "";
   const planFile = flags["plan-file"] ? resolve(flags["plan-file"]) : undefined;
   const skipPlan = boolFlags.has("skip-plan");
+
+  if (command === "resume") {
+    const worktreeName = positional[0] ?? "";
+    if (!worktreeName) {
+      console.error("Error: worktree name is required for resume\n");
+      console.log(USAGE);
+      process.exit(1);
+    }
+    if (planFile) {
+      console.error("Error: --plan-file is only supported with the build command\n");
+      process.exit(1);
+    }
+
+    const globalLlm = flags["global-llm"] ? parseLlm(flags["global-llm"]) : undefined;
+    return {
+      command,
+      worktreeName,
+      task: "",
+      planLlm: flags["plan-llm"] ? parseLlm(flags["plan-llm"]) : (globalLlm ?? DEFAULT_LLM),
+      planReviewLlm: flags["plan-review-llm"] ? parseLlm(flags["plan-review-llm"]) : (globalLlm ?? DEFAULT_LLM),
+      planQaReviewLlm: flags["plan-qa-review-llm"] ? parseLlm(flags["plan-qa-review-llm"]) : (globalLlm ?? DEFAULT_LLM),
+      implementLlm: flags["implement-llm"] ? parseLlm(flags["implement-llm"]) : (globalLlm ?? DEFAULT_LLM),
+      codeReviewLlm: flags["code-review-llm"] ? parseLlm(flags["code-review-llm"]) : (globalLlm ?? DEFAULT_LLM),
+      reviewIterations: flags["review-iterations"] ? parseInt(flags["review-iterations"], 10) : 1,
+      skipPlan,
+      skipPlanReview: boolFlags.has("skip-plan-review"),
+      skipPlanQaReview: boolFlags.has("skip-plan-qa-review"),
+      skipQaReview: boolFlags.has("skip-qa-review"),
+      skipImplement: boolFlags.has("skip-implement"),
+      skipCodeReview: boolFlags.has("skip-code-review"),
+    };
+  }
+
+  const task = positional[0] ?? "";
 
   if (planFile && !existsSync(planFile)) {
     console.error(`Error: --plan-file not found: ${planFile}\n`);
@@ -154,6 +227,7 @@ export function parseArgs(argv: string[]): OrchestrateOptions {
   const globalLlm = flags["global-llm"] ? parseLlm(flags["global-llm"]) : undefined;
 
   return {
+    command,
     task,
     planFile,
     planLlm: flags["plan-llm"] ? parseLlm(flags["plan-llm"]) : (globalLlm ?? DEFAULT_LLM),
@@ -372,6 +446,10 @@ function createWorktree(repoRoot: string): string {
   return worktreePath;
 }
 
+function existingWorktreePath(repoRoot: string, worktreeName: string): string {
+  return join(repoRoot, ".worktrees", worktreeName);
+}
+
 // ---------------------------------------------------------------------------
 // Prompt Helpers
 // ---------------------------------------------------------------------------
@@ -390,13 +468,93 @@ function readGuide(platform: string): string {
   return "";
 }
 
-function readCommandFile(name: string): string {
-  const srcRoot = resolve(import.meta.dirname, "..");
-  return readFileSync(join(srcRoot, "commands", name), "utf-8");
+function ensureIronshaDir(cwd: string): string {
+  const ironshaDir = join(cwd, ".ironsha");
+  mkdirSync(ironshaDir, { recursive: true });
+  return ironshaDir;
 }
 
 function planFilePath(cwd: string): string {
   return join(cwd, ".ironsha", "plan.md");
+}
+
+function stepFilePath(cwd: string): string {
+  return join(cwd, ".ironsha", "step.txt");
+}
+
+function taskFilePath(cwd: string): string {
+  return join(cwd, ".ironsha", "task.txt");
+}
+
+function writeWorkflowStep(cwd: string, step: WorkflowStep): void {
+  ensureIronshaDir(cwd);
+  writeFileSync(stepFilePath(cwd), `${step}\n`);
+}
+
+function readWorkflowStep(cwd: string): WorkflowStep {
+  const path = stepFilePath(cwd);
+  if (!existsSync(path)) {
+    throw new Error(`Missing workflow step file: ${path}`);
+  }
+  const step = readFileSync(path, "utf-8").trim() as WorkflowStep;
+  if (!(WORKFLOW_STEPS.includes(step) || step === "done")) {
+    throw new Error(`Invalid workflow step in ${path}: ${step || "(empty)"}`);
+  }
+  return step;
+}
+
+function writeTaskFile(cwd: string, task: string): void {
+  ensureIronshaDir(cwd);
+  writeFileSync(taskFilePath(cwd), task);
+}
+
+function readRequiredFile(path: string, description: string): string {
+  if (!existsSync(path)) {
+    throw new Error(`Missing ${description}: ${path}`);
+  }
+  return readFileSync(path, "utf-8");
+}
+
+function isStepEnabled(step: WorkflowStep, opts: WorkflowExecutionOptions): boolean {
+  switch (step) {
+    case "plan":
+      return !opts.skipPlan;
+    case "plan-review":
+      return !opts.skipPlanReview;
+    case "qa-plan-review":
+      return !opts.skipPlanQaReview;
+    case "implement":
+      return !opts.skipImplement;
+    case "code-review":
+      return !opts.skipCodeReview;
+    case "qa-review":
+      return !opts.skipCodeReview && !opts.skipQaReview;
+    case "publish":
+      return !opts.skipCodeReview;
+    case "done":
+      return true;
+  }
+}
+
+function firstRunnableStep(opts: WorkflowExecutionOptions): WorkflowStep {
+  for (const step of WORKFLOW_STEPS) {
+    if (isStepEnabled(step, opts)) return step;
+  }
+  return "done";
+}
+
+function nextRunnableStepAfter(step: WorkflowStep, opts: WorkflowExecutionOptions): WorkflowStep {
+  const currentIndex = WORKFLOW_STEPS.indexOf(step);
+  for (let i = currentIndex + 1; i < WORKFLOW_STEPS.length; i++) {
+    const candidate = WORKFLOW_STEPS[i];
+    if (isStepEnabled(candidate, opts)) return candidate;
+  }
+  return "done";
+}
+
+function readCommandFile(name: string): string {
+  const srcRoot = resolve(import.meta.dirname, "..");
+  return readFileSync(join(srcRoot, "commands", name), "utf-8");
 }
 
 function detectPlatformFromDiff(cwd: string, baseBranch: string): string | null {
@@ -950,27 +1108,49 @@ async function runReviewFixLoop(cwd: string, config: ReviewLoopConfig): Promise<
   }
 }
 
-async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<void> {
-  log("PR-REVIEW", `Starting with ${llmLabel(opts.codeReviewLlm)}...`);
-
-  // --- Setup ---
-  log("PR-REVIEW", "Running CI (build/tests)...");
-  await runPrCiPhase(opts.codeReviewLlm, cwd, "pr-ci");
-
-  log("PR-REVIEW", "Initializing local state...");
-  runStateCmd(cwd, ["init"]);
-
-  log("PR-REVIEW", "Committing changes...");
+function commitAllChanges(cwd: string, message: string, logPhase: string): void {
   try {
     runGit(cwd, ["add", "-A"]);
-    runGit(cwd, ["commit", "-m", "orchestrate: implementation changes"]);
+    runGit(cwd, ["commit", "-m", message]);
   } catch {
-    log("PR-REVIEW", "No changes to commit (or already committed).");
+    log(logPhase, "No changes to commit.");
+  }
+}
+
+async function ensureReviewPreparation(
+  opts: OrchestrateOptions,
+  cwd: string,
+  config: {
+    logPhase: string;
+    ciPhasePrefix: string;
+    ciLlm: LlmConfig;
+    commitMessage: string;
+    allowGenerateDescription: boolean;
+    forceGenerateDescription?: boolean;
+    missingDescriptionError: string;
+  },
+): Promise<void> {
+  log(config.logPhase, "Running CI (build/tests)...");
+  await runPrCiPhase(config.ciLlm, cwd, config.ciPhasePrefix, config.logPhase);
+
+  log(config.logPhase, "Initializing local state...");
+  runStateCmd(cwd, ["init"]);
+
+  log(config.logPhase, "Committing changes...");
+  commitAllChanges(cwd, config.commitMessage, config.logPhase);
+
+  const existingDescription = readLocalState(cwd).description?.trim();
+  if (existingDescription && !config.forceGenerateDescription) {
+    log(config.logPhase, "Using existing PR description from local state.");
+    return;
   }
 
-  log("PR-REVIEW", "Generating PR description...");
-  const baseBranch = "main";
-  const platform = detectPlatformFromDiff(cwd, baseBranch);
+  if (!config.allowGenerateDescription) {
+    throw new Error(config.missingDescriptionError);
+  }
+
+  log(config.logPhase, "Generating PR description...");
+  const platform = detectPlatformFromDiff(cwd, "main");
   const descOutput = await runPrintMode(
     opts.codeReviewLlm,
     buildPrDescriptionPrompt(platform),
@@ -979,10 +1159,34 @@ async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<
   );
   const prDraft = parsePrDraft(descOutput);
   runStateCmd(cwd, ["description", "set", "--title", prDraft.title], { stdin: prDraft.body });
+}
 
-  // --- Detect platform for review guides ---
+function resetReviewPhaseState(cwd: string, phase: "code" | "qa", logPhase: string): void {
+  const output = runStateCmd(cwd, ["review", "reset", "--phase", phase]);
+  log(logPhase, output);
+}
 
-  // --- Build review prompt ---
+async function runCodeReviewPhase(
+  opts: OrchestrateOptions,
+  cwd: string,
+  options: { allowGenerateDescription: boolean; resetState: boolean },
+): Promise<void> {
+  log("PR-REVIEW", `Starting with ${llmLabel(opts.codeReviewLlm)}...`);
+  await ensureReviewPreparation(opts, cwd, {
+    logPhase: "PR-REVIEW",
+    ciPhasePrefix: "pr-ci",
+    ciLlm: opts.codeReviewLlm,
+    commitMessage: "orchestrate: implementation changes",
+    allowGenerateDescription: options.allowGenerateDescription,
+    forceGenerateDescription: options.resetState,
+    missingDescriptionError: "Cannot resume code-review without a saved PR description in local state.",
+  });
+  if (options.resetState) {
+    resetReviewPhaseState(cwd, "code", "PR-REVIEW");
+  }
+
+  const baseBranch = "main";
+  const platform = detectPlatformFromDiff(cwd, baseBranch);
   const basePrompt = readPromptFile("base.md")
     .replace(
       "You have access to the GitHub MCP server — use it to list PR review comments, read thread conversations, and understand the current review state",
@@ -995,8 +1199,6 @@ async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<
   const archPrompt = readPromptFile("architecture-pass.md");
   const detailedPrompt = readPromptFile("detailed-pass.md");
   const guideContent = platform ? readGuide(platform) : "";
-
-  // --- Build fix prompt ---
   const codeFixPrompt = readPromptFile("code-fix.md")
     .replace(
       "You have access to the GitHub MCP server — use it to list PR review comments, read thread conversations, and understand what changes are requested",
@@ -1006,8 +1208,6 @@ async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<
       "Use the GitHub MCP tools to list all review comments and threads on this PR",
       "Review the thread state provided below",
     );
-  const qaReviewPromptBase = readPromptFile("qa-review.md");
-  const qaFixPromptBase = readPromptFile("qa-fix.md");
 
   await runReviewFixLoop(cwd, {
     logPhase: "PR-REVIEW",
@@ -1036,54 +1236,119 @@ async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<
       "\n\n## Instructions\nAddress all UNRESOLVED threads. Use the previous-iteration context to avoid repeating failed approaches unless the environment or inputs materially changed. Make code changes, run build/tests, then output the JSON result.",
     ].join("\n"),
   });
+}
 
-  if (!opts.skipQaReview) {
-    log("QA-REVIEW", `Starting with ${llmLabel(opts.planQaReviewLlm)}...`);
-    await runReviewFixLoop(cwd, {
-      logPhase: "QA-REVIEW",
-      reviewLlm: opts.planQaReviewLlm,
-      reviewPhasePrefix: "qa-review",
-      fixPhasePrefix: "qa-fix",
-      ciPhasePrefix: "qa-ci",
-      reviewPhaseFlag: "qa",
-      passLabel: "qa-review-passed",
-      approvalMessage: "QA review passed. Moving to publish.",
-      reviewPrompt: (threadState, previousIterations) => buildQaReviewPrompt(
-        qaReviewPromptBase,
-        previousIterations,
-        threadState,
-        runStateCmd(cwd, ["description"]),
-        baseBranch,
-      ),
-      fixPrompt: (threadState, previousIterations) => [
-        qaFixPromptBase,
-        "\n---\n\n## Previous Iterations\n",
-        previousIterations,
-        "\n---\n\n## Current PR Description\n",
-        runStateCmd(cwd, ["description"]),
-        "\n---\n\n## Current Thread State\n",
-        threadState,
-        "\n\n## Instructions\nAddress all UNRESOLVED QA threads. Use the previous-iteration context to avoid repeating failed approaches unless the environment or inputs materially changed. Update the PR description and visual evidence artifacts if needed. Make code changes only where required, run build/tests, then output the JSON result.",
-      ].join("\n"),
-    });
-  } else {
-    log("QA-REVIEW", "Skipped.");
+async function runQaReviewPhase(
+  opts: OrchestrateOptions,
+  cwd: string,
+  options: { resetState: boolean },
+): Promise<void> {
+  log("QA-REVIEW", `Starting with ${llmLabel(opts.planQaReviewLlm)}...`);
+  await ensureReviewPreparation(opts, cwd, {
+    logPhase: "QA-REVIEW",
+    ciPhasePrefix: "qa-ci",
+    ciLlm: opts.planQaReviewLlm,
+    commitMessage: "orchestrate: qa review prep",
+    allowGenerateDescription: false,
+    missingDescriptionError: "Cannot resume qa-review without a saved PR description in local state.",
+  });
+  if (options.resetState) {
+    resetReviewPhaseState(cwd, "qa", "QA-REVIEW");
   }
 
-  // Commit any outstanding changes before publish
-  try {
-    runGit(cwd, ["add", "-A"]);
-    runGit(cwd, ["commit", "-m", "orchestrate: final changes"]);
-  } catch {
-    // Nothing to commit
-  }
+  const baseBranch = "main";
+  const qaReviewPromptBase = readPromptFile("qa-review.md");
+  const qaFixPromptBase = readPromptFile("qa-fix.md");
+  await runReviewFixLoop(cwd, {
+    logPhase: "QA-REVIEW",
+    reviewLlm: opts.planQaReviewLlm,
+    reviewPhasePrefix: "qa-review",
+    fixPhasePrefix: "qa-fix",
+    ciPhasePrefix: "qa-ci",
+    reviewPhaseFlag: "qa",
+    passLabel: "qa-review-passed",
+    approvalMessage: "QA review passed. Moving to publish.",
+    reviewPrompt: (threadState, previousIterations) => buildQaReviewPrompt(
+      qaReviewPromptBase,
+      previousIterations,
+      threadState,
+      runStateCmd(cwd, ["description"]),
+      baseBranch,
+    ),
+    fixPrompt: (threadState, previousIterations) => [
+      qaFixPromptBase,
+      "\n---\n\n## Previous Iterations\n",
+      previousIterations,
+      "\n---\n\n## Current PR Description\n",
+      runStateCmd(cwd, ["description"]),
+      "\n---\n\n## Current Thread State\n",
+      threadState,
+      "\n\n## Instructions\nAddress all UNRESOLVED QA threads. Use the previous-iteration context to avoid repeating failed approaches unless the environment or inputs materially changed. Update the PR description and visual evidence artifacts if needed. Make code changes only where required, run build/tests, then output the JSON result.",
+    ].join("\n"),
+  });
+}
 
-  // Publish
+function runPublishPhase(cwd: string): void {
+  commitAllChanges(cwd, "orchestrate: final changes", "PR-REVIEW");
   log("PR-REVIEW", "Publishing to GitHub...");
   const publishOutput = runStateCmd(cwd, ["publish"]);
   log("PR-REVIEW", publishOutput);
-
   log("PR-REVIEW", "Complete.");
+}
+
+async function executeWorkflow(
+  opts: OrchestrateOptions,
+  cwd: string,
+  workflowOpts: WorkflowExecutionOptions,
+  initialStep: WorkflowStep,
+  importedPlan?: string,
+): Promise<void> {
+  let currentStep = initialStep;
+  let plan = importedPlan;
+  writeWorkflowStep(cwd, currentStep);
+
+  while (currentStep !== "done") {
+    if (!isStepEnabled(currentStep, workflowOpts)) {
+      currentStep = nextRunnableStepAfter(currentStep, workflowOpts);
+      writeWorkflowStep(cwd, currentStep);
+      continue;
+    }
+
+    switch (currentStep) {
+      case "plan":
+        plan = await runPlanPhase(opts, cwd);
+        break;
+      case "plan-review":
+        plan ??= readRequiredFile(planFilePath(cwd), "plan file");
+        plan = await runReviewPhase(opts, plan, cwd);
+        break;
+      case "qa-plan-review":
+        plan ??= readRequiredFile(planFilePath(cwd), "plan file");
+        plan = await runQaPlanReviewPhase(opts, plan, cwd);
+        break;
+      case "implement":
+        plan ??= readRequiredFile(planFilePath(cwd), "plan file");
+        await runImplementPhase(opts, plan, cwd);
+        break;
+      case "code-review":
+        await runCodeReviewPhase(opts, cwd, {
+          allowGenerateDescription: opts.command === "build",
+          resetState: opts.command === "resume",
+        });
+        break;
+      case "qa-review":
+        await runQaReviewPhase(opts, cwd, {
+          resetState: opts.command === "resume",
+        });
+        break;
+      case "publish":
+        runPublishPhase(cwd);
+        break;
+    }
+
+    currentStep = nextRunnableStepAfter(currentStep, workflowOpts);
+    writeWorkflowStep(cwd, currentStep);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1093,76 +1358,66 @@ async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<
 export async function main(argv: string[] = process.argv): Promise<void> {
   const opts = parseArgs(argv);
   const repoRoot = process.cwd();
-  const importedPlan = opts.planFile ? readFileSync(opts.planFile, "utf-8") : undefined;
-  const useImportedPlan = Boolean(importedPlan);
-  const skipPlanPhase = useImportedPlan || opts.skipPlan;
-  const skipPlanReviewPhase = useImportedPlan || opts.skipPlanReview;
-  const skipPlanQaReviewPhase = useImportedPlan || opts.skipPlanQaReview;
+  const importedPlan = opts.command === "build" && opts.planFile ? readFileSync(opts.planFile, "utf-8") : undefined;
+  const workflowOpts: WorkflowExecutionOptions = {
+    skipPlan: Boolean(importedPlan) || opts.skipPlan,
+    skipPlanReview: Boolean(importedPlan) || opts.skipPlanReview,
+    skipPlanQaReview: Boolean(importedPlan) || opts.skipPlanQaReview,
+    skipImplement: opts.skipImplement,
+    skipCodeReview: opts.skipCodeReview,
+    skipQaReview: opts.skipQaReview,
+  };
   logDir = undefined;
   invocationCounter = 0;
+  let worktreePath: string;
 
-  // Create worktree first so transcripts live inside the repo state for this run.
-  log("SETUP", "Creating git worktree...");
-  const worktreePath = createWorktree(repoRoot);
-  log("SETUP", `Worktree created at ${worktreePath}`);
+  if (opts.command === "resume") {
+    worktreePath = existingWorktreePath(repoRoot, opts.worktreeName!);
+    if (!existsSync(worktreePath)) {
+      console.error(`Error: worktree not found: ${worktreePath}`);
+      process.exit(1);
+    }
+    log("SETUP", `Resuming worktree at ${worktreePath}`);
+  } else {
+    log("SETUP", "Creating git worktree...");
+    worktreePath = createWorktree(repoRoot);
+    log("SETUP", `Worktree created at ${worktreePath}`);
+  }
 
   log("SETUP", "Configuration:");
   if (opts.planFile) {
     log("SETUP", `  Plan file: ${opts.planFile}`);
   }
-  log("SETUP", `  Plan:      ${llmLabel(opts.planLlm)}${skipPlanPhase ? " (skipped)" : ""}`);
-  log("SETUP", `  Plan Review: ${llmLabel(opts.planReviewLlm)} x${opts.reviewIterations}${skipPlanReviewPhase ? " (skipped)" : ""}`);
-  log("SETUP", `  Plan QA:     ${llmLabel(opts.planQaReviewLlm)}${skipPlanQaReviewPhase ? " (skipped)" : ""}`);
+  log("SETUP", `  Plan:      ${llmLabel(opts.planLlm)}${workflowOpts.skipPlan ? " (skipped)" : ""}`);
+  log("SETUP", `  Plan Review: ${llmLabel(opts.planReviewLlm)} x${opts.reviewIterations}${workflowOpts.skipPlanReview ? " (skipped)" : ""}`);
+  log("SETUP", `  Plan QA:     ${llmLabel(opts.planQaReviewLlm)}${workflowOpts.skipPlanQaReview ? " (skipped)" : ""}`);
   log("SETUP", `  Implement: ${llmLabel(opts.implementLlm)}${opts.skipImplement ? " (skipped)" : ""}`);
   log("SETUP", `  Code Review: ${llmLabel(opts.codeReviewLlm)}${opts.skipCodeReview ? " (skipped)" : ""}`);
   log("SETUP", `  Transcripts: ${ensureLogDir(worktreePath)}`);
 
   try {
-    // Phase 1: Plan
-    let plan: string;
-    if (importedPlan) {
-      const importedPlanPath = planFilePath(worktreePath);
-      writeFileSync(importedPlanPath, importedPlan);
-      plan = importedPlan;
-      log("PLAN", `Skipped. Imported existing plan from ${opts.planFile}`);
-      log("PLAN", `Saved imported plan to .ironsha/plan.md`);
-    } else if (!opts.skipPlan) {
-      plan = await runPlanPhase(opts, worktreePath);
-    } else {
-      const planPath = planFilePath(worktreePath);
-      if (!existsSync(planPath)) {
-        console.error(`Error: --skip-plan specified but no .ironsha/plan.md found at ${planPath}`);
-        process.exit(1);
+    if (opts.command === "build") {
+      writeTaskFile(worktreePath, opts.task);
+      if (importedPlan) {
+        const importedPlanPath = planFilePath(worktreePath);
+        ensureIronshaDir(worktreePath);
+        writeFileSync(importedPlanPath, importedPlan);
+        log("PLAN", `Skipped. Imported existing plan from ${opts.planFile}`);
+        log("PLAN", "Saved imported plan to .ironsha/plan.md");
       }
-      plan = readFileSync(planPath, "utf-8");
-      log("PLAN", `Skipped. Loaded existing plan from .ironsha/plan.md`);
-    }
-
-    // Phase 2: Review & Iterate
-    if (!skipPlanReviewPhase) {
-      plan = await runReviewPhase(opts, plan, worktreePath);
+      await executeWorkflow(opts, worktreePath, workflowOpts, firstRunnableStep(workflowOpts), importedPlan);
     } else {
-      log("REVIEW", "Skipped.");
-    }
-
-    if (!skipPlanQaReviewPhase) {
-      plan = await runQaPlanReviewPhase(opts, plan, worktreePath);
-    } else {
-      log("QA-PLAN", "Skipped.");
-    }
-
-    // Phase 3: Implement
-    if (!opts.skipImplement) {
-      await runImplementPhase(opts, plan, worktreePath);
-    } else {
-      log("IMPLEMENT", "Skipped.");
-    }
-
-    // Phase 4: PR Review
-    if (!opts.skipCodeReview) {
-      await runPrReviewPhase(opts, worktreePath);
-    } else {
-      log("PR-REVIEW", "Skipped.");
+      const savedStep = readWorkflowStep(worktreePath);
+      if (savedStep === "done") {
+        throw new Error(`Workflow already complete for ${worktreePath}`);
+      }
+      if (savedStep === "plan" || savedStep === "plan-review" || savedStep === "qa-plan-review") {
+        opts.task = readRequiredFile(taskFilePath(worktreePath), "task file");
+      }
+      if (savedStep === "plan-review" || savedStep === "qa-plan-review" || savedStep === "implement") {
+        readRequiredFile(planFilePath(worktreePath), "plan file");
+      }
+      await executeWorkflow(opts, worktreePath, workflowOpts, savedStep);
     }
 
     log("DONE", `All phases complete. Worktree: ${worktreePath}`);

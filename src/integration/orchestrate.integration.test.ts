@@ -3,9 +3,12 @@ import { randomBytes } from "node:crypto";
 import { execFileSync, execSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
+  readFileSync,
   mkdtempSync,
   mkdirSync,
   rmSync,
+  readdirSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -210,7 +213,7 @@ function createMockClaudeScript(): string {
 function createMockCodexScript(): string {
   return [
     "#!/usr/bin/env node",
-    'const { mkdirSync, readFileSync, writeFileSync } = require("node:fs");',
+    'const { existsSync, mkdirSync, readFileSync, writeFileSync } = require("node:fs");',
     'const { basename, dirname, join } = require("node:path");',
     "",
     "async function readStdin() {",
@@ -277,6 +280,9 @@ function createMockCodexScript(): string {
     '  if (!hasToolingInstructions) {',
     '    return ["```json", JSON.stringify({ event: "REQUEST_CHANGES", comments: [{ path: null, line: null, body: "QA prompt must require Playwright for web UI evidence and XcodeBuildMCP for iOS UI evidence." }] }), "```"].join("\\n");',
     "  }",
+    '  if (process.env.MOCK_QA_REQUEST_CHANGES === "1") {',
+    '    return ["```json", JSON.stringify({ event: "REQUEST_CHANGES", comments: [{ path: null, line: null, body: "Capture the missing QA follow-up evidence before approval." }] }), "```"].join("\\n");',
+    "  }",
     '  return ["```json", "{\\"comments\\":[],\\"event\\":\\"APPROVE\\"}", "```"].join("\\n");',
     "}",
     "",
@@ -329,6 +335,14 @@ function createMockCodexScript(): string {
     '  } else if (prompt.includes("Address all UNRESOLVED threads.")) {',
     "    finalMessage = buildFixResponse(prompt);",
     '  } else if (prompt.includes("You are an engineer addressing QA review findings.")) {',
+    '    if (process.env.MOCK_FAIL_ON_QA_FIX_ONCE === "1") {',
+    '      const sentinelPath = join(process.cwd(), ".ironsha", "mock-qa-fix-failed.txt");',
+    '      if (!existsSync(sentinelPath)) {',
+    '        mkdirSync(dirname(sentinelPath), { recursive: true });',
+    '        writeFileSync(sentinelPath, "failed\\n");',
+    '        throw new Error("Intentional QA fix failure for resume integration test");',
+    "      }",
+    "    }",
     "    finalMessage = buildFixResponse(prompt);",
     "  }",
     "",
@@ -342,6 +356,75 @@ function createMockCodexScript(): string {
     "});",
     "",
   ].join("\n");
+}
+
+function createLocalFixture(runId: string): IntegrationFixture {
+  const rootDir = mkdtempSync(join(tmpdir(), "ironsha-orchestrate-local-"));
+  const seedRepoPath = join(rootDir, "seed");
+  const remotePath = join(rootDir, "remote.git");
+  const repoPath = join(rootDir, "repo");
+  const llmMockBinPath = join(rootDir, "mock-llm-bin");
+
+  mkdirSync(seedRepoPath, { recursive: true });
+  mkdirSync(llmMockBinPath, { recursive: true });
+
+  execSync("git init -b main", { cwd: seedRepoPath, stdio: "pipe" });
+  setupGitIdentity(seedRepoPath);
+  mkdirSync(join(seedRepoPath, "src"), { recursive: true });
+  mkdirSync(join(seedRepoPath, "scripts"), { recursive: true });
+  writeFileSync(join(seedRepoPath, "src", "task.txt"), "Initial task state.\n");
+  writeFileSync(
+    join(seedRepoPath, "scripts", "verify-task.js"),
+    [
+      'import { readFileSync } from "node:fs";',
+      'const text = readFileSync("src/task.txt", "utf8").trim();',
+      "if (!text) throw new Error('src/task.txt must not be empty');",
+      'console.log("task verified");',
+    ].join("\n"),
+  );
+  writeFileSync(
+    join(seedRepoPath, "AGENTS.md"),
+    [
+      "## Build",
+      "```bash",
+      "node scripts/verify-task.js",
+      "```",
+    ].join("\n"),
+  );
+  execSync("git add .", { cwd: seedRepoPath, stdio: "pipe" });
+  execSync('git commit -m "Initial commit"', { cwd: seedRepoPath, stdio: "pipe" });
+
+  execSync(`git init --bare "${remotePath}"`, { stdio: "pipe" });
+  execSync(`git remote add origin "${remotePath}"`, { cwd: seedRepoPath, stdio: "pipe" });
+  execSync("git push -u origin main", { cwd: seedRepoPath, stdio: "pipe" });
+  execSync(`git clone "${remotePath}" "${repoPath}"`, { stdio: "pipe" });
+  setupGitIdentity(repoPath);
+
+  writeExecutable(join(llmMockBinPath, "claude"), createMockClaudeScript());
+  writeExecutable(join(llmMockBinPath, "codex"), createMockCodexScript());
+
+  return {
+    rootDir,
+    repoPath,
+    remotePath,
+    llmMockBinPath,
+  };
+}
+
+function readPersistedLocalState(worktreePath: string): {
+  reviews: Array<{ phase?: string; comments: Array<{ body: string }> }>;
+  description?: string;
+  passLabels?: string[];
+} {
+  const ironshaDir = join(worktreePath, ".ironsha");
+  const stateFile = readdirSync(ironshaDir)
+    .find((entry) => entry.endsWith(".json"));
+  assert.ok(stateFile, `Expected local state file in ${ironshaDir}`);
+  return JSON.parse(readFileSync(join(ironshaDir, stateFile), "utf8")) as {
+    reviews: Array<{ phase?: string; comments: Array<{ body: string }> }>;
+    description?: string;
+    passLabels?: string[];
+  };
 }
 
 function createLiveGithubFixture(runId: string, live: LiveGithubConfig): IntegrationFixture {
@@ -415,6 +498,106 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
     for (const fixture of fixtures) {
       cleanupFixture(fixture);
     }
+  });
+
+  it("resume from qa-review clears old QA comments but preserves code-review comments", () => {
+    const fixture = createLocalFixture(randomBytes(6).toString("hex"));
+    fixtures.push(fixture);
+
+    const cliPath = join(import.meta.dirname, "..", "cli.js");
+    const baseEnv = {
+      ...process.env,
+      PATH: `${fixture.llmMockBinPath}:${process.env.PATH ?? ""}`,
+      GITHUB_TOKEN: "",
+      GH_TOKEN: "",
+    };
+
+    const firstRun = spawnSync(
+      process.execPath,
+      [
+        cliPath,
+        "Complete the task in src/task.txt and open a PR",
+        "--plan-llm", "codex:gpt-5.4",
+        "--plan-review-llm", "codex:gpt-5.4",
+        "--plan-qa-review-llm", "codex:gpt-5.4",
+        "--implement-llm", "codex:gpt-5.4",
+        "--code-review-llm", "codex:gpt-5.4",
+      ],
+      {
+        cwd: fixture.repoPath,
+        encoding: "utf8",
+        env: {
+          ...baseEnv,
+          MOCK_QA_REQUEST_CHANGES: "1",
+          MOCK_FAIL_ON_QA_FIX_ONCE: "1",
+        },
+        stdio: "pipe",
+      },
+    );
+    assert.notEqual(firstRun.status, 0, "Expected first run to fail during qa-fix");
+
+    const worktreesDir = join(fixture.repoPath, ".worktrees");
+    const worktreeName = readdirSync(worktreesDir).find((entry) => entry.startsWith("orchestrate-"));
+    assert.ok(worktreeName, "Expected build to create an orchestrate worktree");
+    const worktreePath = join(worktreesDir, worktreeName);
+
+    const firstStep = readFileSync(join(worktreePath, ".ironsha", "step.txt"), "utf8").trim();
+    assert.equal(firstStep, "qa-review");
+
+    const stateBeforeResume = readPersistedLocalState(worktreePath);
+    const codeCommentBodiesBefore = stateBeforeResume.reviews
+      .filter((review) => review.phase === "code")
+      .flatMap((review) => review.comments.map((comment) => comment.body));
+    const qaCommentBodiesBefore = stateBeforeResume.reviews
+      .filter((review) => review.phase === "qa")
+      .flatMap((review) => review.comments.map((comment) => comment.body));
+    assert.ok(
+      codeCommentBodiesBefore.some((body) => /Clarify the completed task wording/.test(body)),
+      "Expected code-review comments before resume",
+    );
+    assert.ok(
+      qaCommentBodiesBefore.some((body) => /Capture the missing QA follow-up evidence/.test(body)),
+      "Expected QA-review comments before resume",
+    );
+
+    const resumeRun = spawnSync(
+      process.execPath,
+      [
+        cliPath,
+        "resume",
+        worktreeName,
+        "--plan-llm", "codex:gpt-5.4",
+        "--plan-review-llm", "codex:gpt-5.4",
+        "--plan-qa-review-llm", "codex:gpt-5.4",
+        "--implement-llm", "codex:gpt-5.4",
+        "--code-review-llm", "codex:gpt-5.4",
+      ],
+      {
+        cwd: fixture.repoPath,
+        encoding: "utf8",
+        env: baseEnv,
+        stdio: "pipe",
+      },
+    );
+    assert.notEqual(resumeRun.status, 0, "Expected resume run to fail at publish in local fixture");
+
+    const secondStep = readFileSync(join(worktreePath, ".ironsha", "step.txt"), "utf8").trim();
+    assert.equal(secondStep, "publish");
+
+    const stateAfterResume = readPersistedLocalState(worktreePath);
+    const codeCommentBodiesAfter = stateAfterResume.reviews
+      .filter((review) => review.phase === "code")
+      .flatMap((review) => review.comments.map((comment) => comment.body));
+    const qaCommentBodiesAfter = stateAfterResume.reviews
+      .filter((review) => review.phase === "qa")
+      .flatMap((review) => review.comments.map((comment) => comment.body));
+
+    assert.deepEqual(codeCommentBodiesAfter, codeCommentBodiesBefore);
+    assert.ok(
+      !qaCommentBodiesAfter.some((body) => /Capture the missing QA follow-up evidence/.test(body)),
+      "Expected old QA-review comments to be discarded on resume",
+    );
+    assert.equal(qaCommentBodiesAfter.length, 0);
   });
 
   it(

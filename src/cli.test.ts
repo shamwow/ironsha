@@ -98,6 +98,37 @@ test("parseArgs accepts --plan-file without a task and resolves it from cwd", ()
   }
 });
 
+test("parseArgs supports explicit build command", () => {
+  const opts = parseArgs([
+    "node",
+    "cli.js",
+    "build",
+    "ship the feature",
+  ]);
+
+  assert.equal(opts.command, "build");
+  assert.equal(opts.task, "ship the feature");
+});
+
+test("parseArgs supports resume with llm and skip flags", () => {
+  const opts = parseArgs([
+    "node",
+    "cli.js",
+    "resume",
+    "orchestrate-123",
+    "--implement-llm",
+    "codex:o3",
+    "--skip-qa-review",
+  ]);
+
+  assert.equal(opts.command, "resume");
+  assert.equal(opts.worktreeName, "orchestrate-123");
+  assert.equal(opts.task, "");
+  assert.equal(opts.implementLlm.provider, "codex");
+  assert.equal(opts.implementLlm.model, "o3");
+  assert.equal(opts.skipQaReview, true);
+});
+
 test("parseArgs prefers --plan-file over relying on --skip-plan worktree state", () => {
   const tempDir = mkdtempSync(join(tmpdir(), "ironsha-plan-file-"));
   const planPath = join(tempDir, "imported.md");
@@ -141,6 +172,28 @@ test("cli exits early with a clear error when --plan-file is missing", () => {
 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /--plan-file not found/i);
+  assert.doesNotMatch(result.stderr, /Creating git worktree/i);
+});
+
+test("resume exits early with a clear error when the worktree is missing", () => {
+  const tempDir = mkdtempSync(join(tmpdir(), "ironsha-resume-"));
+  const cliPath = join(import.meta.dirname, "cli.js");
+  const result = spawnSync(
+    process.execPath,
+    [
+      cliPath,
+      "resume",
+      "orchestrate-missing",
+    ],
+    {
+      cwd: tempDir,
+      encoding: "utf8",
+      stdio: "pipe",
+    },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /worktree not found/i);
   assert.doesNotMatch(result.stderr, /Creating git worktree/i);
 });
 

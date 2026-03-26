@@ -245,6 +245,16 @@ export class LocalStateBackend implements StateBackend {
     await this.persist();
   }
 
+  async clearReviews(_pr: PRInfo, phase?: ReviewPhase): Promise<void> {
+    const nextReviews = phase
+      ? this.state.reviews.filter((review) => this.getReviewPhase(review) !== phase)
+      : [];
+    if (nextReviews.length !== this.state.reviews.length) {
+      this.state.reviews = nextReviews;
+      await this.persist();
+    }
+  }
+
   async formatThreadStateForAgent(_pr: PRInfo, phase?: ReviewPhase): Promise<string> {
     const lines: string[] = [];
 
