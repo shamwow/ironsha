@@ -27,18 +27,23 @@ export interface BuildProviderInvocationOptions {
   promptPath?: string;
   githubToken?: string;
   maxTurns?: number;
+  resumeSessionId?: string;
 }
 
 interface StreamJsonExtraction {
   text: string | null;
   resultText: string | null;
   maxTurnsExceeded: boolean;
+  sessionId: string | null;
 }
 
 function extractFromStreamJson(line: string): StreamJsonExtraction {
-  if (!line.trim()) return { text: null, resultText: null, maxTurnsExceeded: false };
+  if (!line.trim()) {
+    return { text: null, resultText: null, maxTurnsExceeded: false, sessionId: null };
+  }
   try {
     const event = JSON.parse(line);
+    const sessionId = typeof event.session_id === "string" ? event.session_id : null;
     if (event.type === "assistant" && event.message?.content) {
       const parts: string[] = [];
       for (const block of event.message.content) {
@@ -46,10 +51,12 @@ function extractFromStreamJson(line: string): StreamJsonExtraction {
           parts.push(block.text);
         }
       }
-      if (parts.length > 0) return { text: parts.join(""), resultText: null, maxTurnsExceeded: false };
+      if (parts.length > 0) {
+        return { text: parts.join(""), resultText: null, maxTurnsExceeded: false, sessionId };
+      }
     }
     if (event.type === "result" && event.subtype === "error_max_turns") {
-      return { text: null, resultText: null, maxTurnsExceeded: true };
+      return { text: null, resultText: null, maxTurnsExceeded: true, sessionId };
     }
     if (event.type === "result" && event.result) {
       const resultStr = typeof event.result === "string"
@@ -58,12 +65,15 @@ function extractFromStreamJson(line: string): StreamJsonExtraction {
             .filter((b) => b.type === "text")
             .map((b) => b.text ?? "")
             .join("");
-      if (resultStr) return { text: null, resultText: resultStr, maxTurnsExceeded: false };
+      if (resultStr) {
+        return { text: null, resultText: resultStr, maxTurnsExceeded: false, sessionId };
+      }
     }
+    return { text: null, resultText: null, maxTurnsExceeded: false, sessionId };
   } catch {
     // Ignore invalid lines; the caller still has the raw stdout transcript.
   }
-  return { text: null, resultText: null, maxTurnsExceeded: false };
+  return { text: null, resultText: null, maxTurnsExceeded: false, sessionId: null };
 }
 
 async function createClaudeMcpConfig(token: string): Promise<string> {
@@ -107,7 +117,7 @@ export async function buildProviderInvocation(
 async function buildClaudeInvocation(
   options: BuildProviderInvocationOptions,
 ): Promise<ProviderInvocationSpec> {
-  const { mode, model, maxTurns, promptPath, githubToken } = options;
+  const { mode, model, maxTurns, promptPath, githubToken, resumeSessionId } = options;
   const args =
     mode === "review"
       ? [
@@ -132,9 +142,13 @@ async function buildClaudeInvocation(
           "enabled",
           "--output-format",
           "stream-json",
-          "--max-turns",
-          String(maxTurns ?? 1000),
+        "--max-turns",
+        String(maxTurns ?? 1000),
         ];
+
+  if (resumeSessionId) {
+    args.push("--resume", resumeSessionId);
+  }
 
   const cleanupPaths: string[] = [];
   if (mode === "review") {
@@ -171,8 +185,9 @@ async function buildCodexInvocation(
   options: BuildProviderInvocationOptions,
 ): Promise<ProviderInvocationSpec> {
   const outputFilePath = await createCodexOutputFile();
-  const args = [
-    "exec",
+  const args = options.resumeSessionId ? ["exec", "resume"] : ["exec"];
+
+  args.push(
     "--model",
     options.model,
     "--json",
@@ -180,10 +195,14 @@ async function buildCodexInvocation(
     outputFilePath,
     "--color",
     "never",
-  ];
+  );
 
   if (options.mode !== "print") {
     args.push("--dangerously-bypass-approvals-and-sandbox");
+  }
+
+  if (options.resumeSessionId) {
+    args.push(options.resumeSessionId);
   }
 
   args.push("-");
@@ -218,6 +237,7 @@ export class ProviderOutputCollector {
   private resultContent = "";
   private claudeRetryCount = 0;
   private claudeMaxTurnsExceeded = false;
+  private sessionId: string | null = null;
 
   constructor(
     private readonly spec: ProviderInvocationSpec,
@@ -238,6 +258,9 @@ export class ProviderOutputCollector {
           this.claudeRetryCount++;
         }
         const extracted = extractFromStreamJson(line);
+        if (extracted.sessionId) {
+          this.sessionId = extracted.sessionId;
+        }
         if (extracted.maxTurnsExceeded) {
           this.claudeMaxTurnsExceeded = true;
         }
@@ -253,6 +276,20 @@ export class ProviderOutputCollector {
     }
 
     if (this.spec.stdoutFormat === "codex-jsonl") {
+      this.lineBuffer += chunk;
+      const lines = this.lineBuffer.split("\n");
+      this.lineBuffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line);
+          if (event.type === "thread.started" && typeof event.thread_id === "string") {
+            this.sessionId = event.thread_id;
+          }
+        } catch {
+          // Keep raw stdout untouched for transcripts even if some events are malformed.
+        }
+      }
       return this.streamToUser ? chunk : "";
     }
 
@@ -269,9 +306,22 @@ export class ProviderOutputCollector {
         this.claudeRetryCount++;
       }
       const extracted = extractFromStreamJson(this.lineBuffer);
+      if (extracted.sessionId) this.sessionId = extracted.sessionId;
       if (extracted.maxTurnsExceeded) this.claudeMaxTurnsExceeded = true;
       if (extracted.text) this.textContent += extracted.text;
       if (extracted.resultText) this.resultContent += extracted.resultText;
+      this.lineBuffer = "";
+    }
+
+    if (this.spec.stdoutFormat === "codex-jsonl" && this.lineBuffer) {
+      try {
+        const event = JSON.parse(this.lineBuffer);
+        if (event.type === "thread.started" && typeof event.thread_id === "string") {
+          this.sessionId = event.thread_id;
+        }
+      } catch {
+        // Ignore malformed trailing JSONL records.
+      }
       this.lineBuffer = "";
     }
 
@@ -310,6 +360,10 @@ export class ProviderOutputCollector {
 
   shouldRetryForMaxTurns(): boolean {
     return this.spec.stdoutFormat === "claude-stream-json" && this.claudeMaxTurnsExceeded;
+  }
+
+  getSessionId(): string | null {
+    return this.sessionId;
   }
 
   async cleanup(): Promise<void> {

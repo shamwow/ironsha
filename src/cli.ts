@@ -66,6 +66,10 @@ interface WorkflowExecutionOptions {
 const DEFAULT_LLM: LlmConfig = { provider: "claude", model: "claude-opus-4-6" };
 const VALID_PROVIDERS = ["claude", "codex"] as const;
 const MAX_TURNS = 50;
+const INVOCATION_TIMEOUT_MS = 300_000;
+const MAX_TIMEOUT_RESUME_ATTEMPTS = 3;
+const RESUME_CONTINUATION_PROMPT =
+  "The previous invocation timed out after 5 minutes. Continue from the existing conversation context and finish the task without restarting from scratch.";
 
 const WORKFLOW_STEPS: WorkflowStep[] = [
   "plan",
@@ -343,77 +347,137 @@ async function runLlmModeWithRetry(
   mode: "print" | "agentic",
 ): Promise<string> {
   const maxAttempts = llm.provider === "claude" ? 2 : 1;
+  let resumeSessionId: string | undefined;
+  let nextPrompt = prompt;
+  let timeoutResumeAttempts = 0;
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+  for (let attempt = 1; ; attempt++) {
     const spec = await buildProviderInvocation({
       provider: llm.provider,
       model: llm.model,
       mode,
       maxTurns: MAX_TURNS,
+      resumeSessionId,
     });
     const transcript = openTranscriptStreams(phase);
     log("SUBPROCESS", `${spec.command} ${spec.args.join(" ")}`);
     log("SUBPROCESS", `Transcript: ${transcript.stdoutPath}`);
 
-    try {
-      return await new Promise((resolve, reject) => {
-        const child = spawn(spec.command, spec.args, {
-          cwd,
-          env: spec.env,
-          stdio: ["pipe", "pipe", "pipe"],
-        });
-        const collector = new ProviderOutputCollector(spec, false);
+    const result = await new Promise<
+      | { kind: "success"; output: string }
+      | { kind: "timeout"; sessionId: string | null }
+      | { kind: "max-turns"; sessionId: string | null }
+      | { kind: "error"; error: Error }
+    >((resolve) => {
+      const child = spawn(spec.command, spec.args, {
+        cwd,
+        env: spec.env,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      const collector = new ProviderOutputCollector(spec, false);
+      let timedOut = false;
+      let forceKillTimer: NodeJS.Timeout | undefined;
+      const timeoutTimer = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGTERM");
+        forceKillTimer = setTimeout(() => {
+          child.kill("SIGKILL");
+        }, 1_000);
+      }, INVOCATION_TIMEOUT_MS);
 
-        child.stdout.on("data", (data: Buffer) => {
-          transcript.stdout.write(data);
-          collector.handleStdout(data);
-          if (collector.shouldAbortForProviderFailure()) {
-            child.kill("SIGTERM");
-          }
-        });
-        child.stderr.on("data", (data: Buffer) => {
-          collector.handleStderr(data);
-          transcript.stderr.write(data);
-        });
+      child.stdout.on("data", (data: Buffer) => {
+        transcript.stdout.write(data);
+        collector.handleStdout(data);
+        if (collector.shouldAbortForProviderFailure()) {
+          child.kill("SIGTERM");
+        }
+      });
+      child.stderr.on("data", (data: Buffer) => {
+        collector.handleStderr(data);
+        transcript.stderr.write(data);
+      });
 
-        child.stdin.write(buildProviderInput(spec, prompt));
-        child.stdin.end();
+      child.stdin.write(buildProviderInput(spec, nextPrompt));
+      child.stdin.end();
 
-        child.on("close", async (code) => {
-          const output = await collector.finalize();
-          const shouldRetryForMaxTurns = collector.shouldRetryForMaxTurns();
-          await collector.cleanup();
-          transcript.stdout.end();
-          transcript.stderr.end();
-          if (code === 0) {
-            resolve(output);
-            return;
-          }
-          if (
-            llm.provider === "claude"
-            && shouldRetryForMaxTurns
-            && attempt < maxAttempts
-          ) {
-            log("SUBPROCESS", `Claude exceeded max turns during ${phase}; retrying once.`);
-            resolve(await runLlmModeWithRetry(llm, prompt, cwd, phase, mode));
-            return;
-          }
-          reject(new Error(formatSubprocessFailure(spec.command, code, collector.getStderr(), output)));
-        });
-
-        child.on("error", async (err) => {
-          await collector.cleanup();
-          reject(err);
+      child.on("close", async (code) => {
+        clearTimeout(timeoutTimer);
+        if (forceKillTimer) {
+          clearTimeout(forceKillTimer);
+        }
+        const output = await collector.finalize();
+        const sessionId = collector.getSessionId();
+        const shouldRetryForMaxTurns = collector.shouldRetryForMaxTurns();
+        await collector.cleanup();
+        transcript.stdout.end();
+        transcript.stderr.end();
+        if (code === 0) {
+          resolve({ kind: "success", output });
+          return;
+        }
+        if (timedOut) {
+          resolve({ kind: "timeout", sessionId });
+          return;
+        }
+        if (llm.provider === "claude" && shouldRetryForMaxTurns && attempt < maxAttempts) {
+          resolve({ kind: "max-turns", sessionId });
+          return;
+        }
+        resolve({
+          kind: "error",
+          error: new Error(formatSubprocessFailure(spec.command, code, collector.getStderr(), output)),
         });
       });
-    } catch (err) {
-      if (attempt >= maxAttempts) {
-        throw err;
+
+      child.on("error", async (err) => {
+        clearTimeout(timeoutTimer);
+        if (forceKillTimer) {
+          clearTimeout(forceKillTimer);
+        }
+        await collector.cleanup();
+        resolve({
+          kind: "error",
+          error: err instanceof Error ? err : new Error(String(err)),
+        });
+      });
+    });
+
+    if (result.kind === "success") {
+      return result.output;
+    }
+
+    if (result.kind === "timeout") {
+      if (!result.sessionId) {
+        throw new Error(
+          `${spec.displayName} timed out after 5 minutes during ${phase}, and the session could not be resumed because no session id was captured.`,
+        );
       }
+      timeoutResumeAttempts++;
+      if (timeoutResumeAttempts > MAX_TIMEOUT_RESUME_ATTEMPTS) {
+        throw new Error(
+          `${spec.displayName} timed out after 5 minutes during ${phase} and exceeded the ${MAX_TIMEOUT_RESUME_ATTEMPTS} resume-attempt limit.`,
+        );
+      }
+      resumeSessionId = result.sessionId;
+      nextPrompt = RESUME_CONTINUATION_PROMPT;
+      log(
+        "SUBPROCESS",
+        `${spec.displayName} timed out after 5 minutes during ${phase}; resuming session ${resumeSessionId} (attempt ${timeoutResumeAttempts}/${MAX_TIMEOUT_RESUME_ATTEMPTS}).`,
+      );
+      continue;
+    }
+
+    if (result.kind === "max-turns") {
+      resumeSessionId = result.sessionId ?? undefined;
+      nextPrompt = result.sessionId ? RESUME_CONTINUATION_PROMPT : prompt;
+      log("SUBPROCESS", `Claude exceeded max turns during ${phase}; retrying once.`);
+      continue;
+    }
+
+    if (attempt >= maxAttempts) {
+      throw result.error;
     }
   }
-
-  throw new Error(`Unexpected ${mode} invocation retry failure.`);
 }
 
 /**

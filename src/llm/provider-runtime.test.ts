@@ -69,6 +69,29 @@ test("buildProviderInvocation uses codex exec for print mode without quiet", asy
   assert.equal(invocation.stdoutFormat, "codex-jsonl");
 });
 
+test("buildProviderInvocation adds Claude resume flag when session id is provided", async () => {
+  const invocation = await buildProviderInvocation({
+    provider: "claude",
+    model: "claude-sonnet-4-6",
+    mode: "print",
+    resumeSessionId: "session-123",
+  });
+
+  assert.match(invocation.args.join(" "), /--resume session-123/);
+});
+
+test("buildProviderInvocation uses codex exec resume when session id is provided", async () => {
+  const invocation = await buildProviderInvocation({
+    provider: "codex",
+    model: "gpt-5.4",
+    mode: "agentic",
+    resumeSessionId: "019d2b8e-4ecd-7951-aff9-a0b18d317f5e",
+  });
+
+  assert.deepEqual(invocation.args.slice(0, 2), ["exec", "resume"]);
+  assert.ok(invocation.args.includes("019d2b8e-4ecd-7951-aff9-a0b18d317f5e"));
+});
+
 test("buildProviderInvocation composes prompt file into codex review stdin", async () => {
   const dir = mkdtempSync(join(tmpdir(), "ironsha-provider-test-"));
   const promptPath = join(dir, "prompt.md");
@@ -142,6 +165,45 @@ test("ProviderOutputCollector extracts Claude assistant text from stream-json ou
 
   assert.equal(streamed, "hello from claude");
   assert.equal(await collector.finalize(), "hello from claude");
+  await collector.cleanup();
+});
+
+test("ProviderOutputCollector captures Claude session id from stream-json output", async () => {
+  const invocation = await buildProviderInvocation({
+    provider: "claude",
+    model: "claude-sonnet-4-6",
+    mode: "print",
+    maxTurns: 10,
+  });
+  const collector = new ProviderOutputCollector(invocation, false);
+
+  collector.handleStdout(
+    Buffer.from(
+      JSON.stringify({
+        type: "system",
+        subtype: "init",
+        session_id: "77a31400-cf96-4113-8805-ba28b50150a7",
+      }) + "\n",
+    ),
+  );
+
+  assert.equal(collector.getSessionId(), "77a31400-cf96-4113-8805-ba28b50150a7");
+  await collector.cleanup();
+});
+
+test("ProviderOutputCollector captures Codex thread id from jsonl stdout", async () => {
+  const invocation = await buildProviderInvocation({
+    provider: "codex",
+    model: "gpt-5.4",
+    mode: "print",
+  });
+  const collector = new ProviderOutputCollector(invocation, false);
+
+  collector.handleStdout(
+    Buffer.from('{"type":"thread.started","thread_id":"019d2b8e-4ecd-7951-aff9-a0b18d317f5e"}\n'),
+  );
+
+  assert.equal(collector.getSessionId(), "019d2b8e-4ecd-7951-aff9-a0b18d317f5e");
   await collector.cleanup();
 });
 
