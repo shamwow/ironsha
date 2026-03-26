@@ -73,6 +73,19 @@ function isMediaPath(target: string): boolean {
   return MEDIA_EXTENSIONS.has(fileExtension(target));
 }
 
+function extractBareMediaPaths(body: string): string[] {
+  const targets = new Set<string>();
+  const pattern = /(^|[\s:(>])((?:\.\/)?\.ironsha\/pr-media\/[^\s)<]+(?:png|jpg|jpeg|gif|webp|svg|avif|mp4|mov|webm|m4v))(?=$|[\s),])/gim;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(body)) !== null) {
+    const target = match[2];
+    if (!isExternalUrl(target) && isMediaPath(target)) {
+      targets.add(trimLocalPrefix(target));
+    }
+  }
+  return [...targets];
+}
+
 export function rewriteMediaReferencesForGithub(body: string, pr: PRInfo): string {
   const rewriteImage = (_match: string, alt: string, target: string): string => {
     if (isExternalUrl(target)) {
@@ -95,9 +108,22 @@ export function rewriteMediaReferencesForGithub(body: string, pr: PRInfo): strin
     return `[${label}](${buildBlobUrl(pr, mediaBranchPath(pr, target), IMAGE_EXTENSIONS.has(fileExtension(target)), PR_MEDIA_BRANCH)})`;
   };
 
-  return body
+  const rewritten = body
     .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, rewriteImage)
     .replace(/(?<!!)\[([^\]]+)\]\(([^)\s]+)\)/g, rewriteLink);
+
+  return rewritten.replace(
+    /(^|[\s:(>])((?:\.\/)?\.ironsha\/pr-media\/[^\s)<]+(?:png|jpg|jpeg|gif|webp|svg|avif|mp4|mov|webm|m4v))(?=$|[\s),])/gim,
+    (_match: string, prefix: string, target: string) => {
+      const rewrittenTarget = buildBlobUrl(
+        pr,
+        mediaBranchPath(pr, target),
+        IMAGE_EXTENSIONS.has(fileExtension(target)),
+        PR_MEDIA_BRANCH,
+      );
+      return `${prefix}[${trimLocalPrefix(target)}](${rewrittenTarget})`;
+    },
+  );
 }
 
 function extractReferencedMediaPaths(body: string): string[] {
@@ -109,6 +135,9 @@ function extractReferencedMediaPaths(body: string): string[] {
     if (isExternalUrl(target)) continue;
     if (!isMediaPath(target)) continue;
     targets.add(trimLocalPrefix(target));
+  }
+  for (const target of extractBareMediaPaths(body)) {
+    targets.add(target);
   }
   return [...targets];
 }

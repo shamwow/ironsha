@@ -343,3 +343,22 @@ test("rewriteMediaReferencesForGithub rewrites all media to pr-media", () => {
   assert.match(rewritten, /blob\/pr-media\/pr-media\/feature-branch\/\.ironsha\/pr-media\/mock-ui-screenshot\.png\?raw=true/);
   assert.match(rewritten, /blob\/pr-media\/pr-media\/feature-branch\/\.ironsha\/pr-media\/mock-ui-demo\.mp4/);
 });
+
+test("rewriteMediaReferencesForGithub rewrites bare media artifact paths", () => {
+  const body = [
+    "**Visual evidence**",
+    "- .ironsha/pr-media/mock-ui-screenshot.png",
+    "- ./.ironsha/pr-media/mock-ui-demo.mp4",
+  ].join("\n");
+  const rewritten = rewriteMediaReferencesForGithub(body, {
+    owner: "shamwow",
+    repo: "openarena",
+    number: 23,
+    branch: "feature-branch",
+    baseBranch: "main",
+    title: "Test PR",
+  });
+
+  assert.match(rewritten, /\[\.ironsha\/pr-media\/mock-ui-screenshot\.png\]\(https:\/\/github\.com\/shamwow\/openarena\/blob\/pr-media\/pr-media\/feature-branch\/\.ironsha\/pr-media\/mock-ui-screenshot\.png\?raw=true\)/);
+  assert.match(rewritten, /\[\.ironsha\/pr-media\/mock-ui-demo\.mp4\]\(https:\/\/github\.com\/shamwow\/openarena\/blob\/pr-media\/pr-media\/feature-branch\/\.ironsha\/pr-media\/mock-ui-demo\.mp4\)/);
+});
