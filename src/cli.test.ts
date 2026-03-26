@@ -12,6 +12,7 @@ const {
   formatPreviousIterations,
   formatSubprocessFailure,
 } = await import("./cli.js");
+const { rewriteMediaReferencesForGithub } = await import("./local/cli.js");
 
 test("formatSubprocessFailure surfaces provider rate limits clearly", () => {
   const message = formatSubprocessFailure(
@@ -61,6 +62,7 @@ test("buildImplementPrompt requires visual evidence handling for React UI diffs"
   assert.match(prompt, /open the app, navigate it into the correct product state/i);
   assert.match(prompt, /screenshots/i);
   assert.match(prompt, /capture a short video/i);
+  assert.match(prompt, /\.ironsha\/pr-media\//i);
   assert.match(prompt, /include their exact file paths in your final summary/i);
 });
 
@@ -71,6 +73,7 @@ test("buildImplementPrompt requires XcodeBuildMCP for iOS UI diffs", () => {
   assert.match(prompt, /launch the app in the iOS simulator/i);
   assert.match(prompt, /screenshots/i);
   assert.match(prompt, /capture a short video/i);
+  assert.match(prompt, /\.ironsha\/pr-media\//i);
 });
 
 test("buildImplementPrompt omits visual evidence instructions for non-UI platforms", () => {
@@ -130,6 +133,9 @@ test("buildQaReviewPrompt requires visual evidence validation for UI changes", (
   assert.match(prompt, /actually show the implemented feature/i);
   assert.match(prompt, /GitHub-hosted/i);
   assert.match(prompt, /load successfully from the PR or branch/i);
+  assert.match(prompt, /use the `pr-media` branch for all media/i);
+  assert.match(prompt, /stage media under `\.ironsha\/pr-media\/`/i);
+  assert.match(prompt, /publish them under `pr-media\/<worktree-name>\/`/i);
   assert.match(prompt, /render inline for screenshots where GitHub supports it instead of 404ing/i);
   assert.match(prompt, /git diff origin\/main\.\.\.HEAD/);
 });
@@ -173,4 +179,22 @@ test("buildCodeReviewPrompt includes previous iteration context", () => {
   assert.match(prompt, /Cycle 1 review: REQUEST_CHANGES - Clarify task wording\./);
   assert.match(prompt, /## Current Thread State/);
   assert.match(prompt, /git diff origin\/main\.\.\.HEAD/);
+});
+
+test("rewriteMediaReferencesForGithub rewrites all media to pr-media", () => {
+  const body = [
+    "![Screenshot](./.ironsha/pr-media/mock-ui-screenshot.png)",
+    "[Video](./.ironsha/pr-media/mock-ui-demo.mp4)",
+  ].join("\n");
+  const rewritten = rewriteMediaReferencesForGithub(body, {
+    owner: "shamwow",
+    repo: "openarena",
+    number: 18,
+    branch: "feature-branch",
+    baseBranch: "main",
+    title: "Test PR",
+  });
+
+  assert.match(rewritten, /blob\/pr-media\/pr-media\/feature-branch\/\.ironsha\/pr-media\/mock-ui-screenshot\.png\?raw=true/);
+  assert.match(rewritten, /blob\/pr-media\/pr-media\/feature-branch\/\.ironsha\/pr-media\/mock-ui-demo\.mp4/);
 });

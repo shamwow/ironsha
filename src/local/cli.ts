@@ -1,6 +1,7 @@
 import { execFile, execFileSync, execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { LocalStateBackend } from "./state-backend.js";
 import { makeFooter } from "../shared/footer.js";
@@ -29,6 +30,9 @@ const REQUIRED_PASS_LABELS: readonly PassLabel[] = [
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "avif"]);
 const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "webm", "m4v"]);
+const MEDIA_EXTENSIONS = new Set([...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS]);
+const PR_MEDIA_BRANCH = "pr-media";
+const PR_MEDIA_PREFIX = "pr-media";
 
 function passLabelForPhase(phase: string | undefined): PassLabel {
   return phase === "qa" ? "agent-qa-review-passed" : "agent-code-review-passed";
@@ -56,11 +60,19 @@ function fileExtension(target: string): string {
   return ext.toLowerCase();
 }
 
-function buildBlobUrl(pr: PRInfo, relativePath: string, raw: boolean): string {
+function buildBlobUrl(pr: PRInfo, relativePath: string, raw: boolean, branch = pr.branch): string {
   const normalized = trimLocalPrefix(relativePath).split("\\").join("/");
   const encodedPath = normalized.split("/").map(encodeURIComponent).join("/");
-  const base = `https://github.com/${pr.owner}/${pr.repo}/blob/${encodeURIComponent(pr.branch)}/${encodedPath}`;
+  const base = `https://github.com/${pr.owner}/${pr.repo}/blob/${encodeURIComponent(branch)}/${encodedPath}`;
   return raw ? `${base}?raw=true` : base;
+}
+
+function mediaBranchPath(pr: PRInfo, relativePath: string): string {
+  return join(PR_MEDIA_PREFIX, pr.branch, trimLocalPrefix(relativePath)).split("\\").join("/");
+}
+
+function isMediaPath(target: string): boolean {
+  return MEDIA_EXTENSIONS.has(fileExtension(target));
 }
 
 export function rewriteMediaReferencesForGithub(body: string, pr: PRInfo): string {
@@ -72,23 +84,108 @@ export function rewriteMediaReferencesForGithub(body: string, pr: PRInfo): strin
     if (!IMAGE_EXTENSIONS.has(ext)) {
       return `![${alt}](${target})`;
     }
-    return `![${alt}](${buildBlobUrl(pr, target, true)})`;
+    return `![${alt}](${buildBlobUrl(pr, mediaBranchPath(pr, target), true, PR_MEDIA_BRANCH)})`;
   };
 
   const rewriteLink = (_match: string, label: string, target: string): string => {
     if (isExternalUrl(target)) {
       return `[${label}](${target})`;
     }
-    const ext = fileExtension(target);
-    if (!IMAGE_EXTENSIONS.has(ext) && !VIDEO_EXTENSIONS.has(ext)) {
+    if (!isMediaPath(target)) {
       return `[${label}](${target})`;
     }
-    return `[${label}](${buildBlobUrl(pr, target, IMAGE_EXTENSIONS.has(ext))})`;
+    return `[${label}](${buildBlobUrl(pr, mediaBranchPath(pr, target), IMAGE_EXTENSIONS.has(fileExtension(target)), PR_MEDIA_BRANCH)})`;
   };
 
   return body
     .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, rewriteImage)
     .replace(/(?<!!)\[([^\]]+)\]\(([^)\s]+)\)/g, rewriteLink);
+}
+
+function extractReferencedMediaPaths(body: string): string[] {
+  const targets = new Set<string>();
+  const pattern = /(?:!\[[^\]]*\]|\[[^\]]+\])\(([^)\s]+)\)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(body)) !== null) {
+    const target = match[1];
+    if (isExternalUrl(target)) continue;
+    if (!isMediaPath(target)) continue;
+    targets.add(trimLocalPrefix(target));
+  }
+  return [...targets];
+}
+
+function syncMediaArtifactsToMediaBranch(
+  checkoutPath: string,
+  pr: PRInfo,
+  body: string,
+): void {
+  const mediaPaths = extractReferencedMediaPaths(body);
+  if (mediaPaths.length === 0) return;
+
+  const remoteUrl = execFileSync(
+    "git",
+    ["remote", "get-url", "origin"],
+    { cwd: checkoutPath, encoding: "utf8", stdio: "pipe" },
+  ).trim();
+  const tempRepo = mkdtempSync(join(tmpdir(), "ironsha-pr-media-"));
+  const git = (args: string[]): string =>
+    execFileSync("git", args, {
+      cwd: tempRepo,
+      encoding: "utf8",
+      stdio: "pipe",
+    }).toString();
+
+  try {
+    git(["init", "-q"]);
+    git(["remote", "add", "origin", remoteUrl]);
+
+    try {
+      git(["fetch", "origin", PR_MEDIA_BRANCH]);
+      git(["checkout", "-B", PR_MEDIA_BRANCH, "FETCH_HEAD"]);
+    } catch {
+      git(["checkout", "--orphan", PR_MEDIA_BRANCH]);
+    }
+
+    try {
+      const userName = execFileSync("git", ["config", "user.name"], {
+        cwd: checkoutPath,
+        encoding: "utf8",
+        stdio: "pipe",
+      }).trim();
+      if (userName) git(["config", "user.name", userName]);
+    } catch {
+      git(["config", "user.name", "ironsha"]);
+    }
+    try {
+      const userEmail = execFileSync("git", ["config", "user.email"], {
+        cwd: checkoutPath,
+        encoding: "utf8",
+        stdio: "pipe",
+      }).trim();
+      if (userEmail) git(["config", "user.email", userEmail]);
+    } catch {
+      git(["config", "user.email", "ironsha@example.com"]);
+    }
+
+    for (const relativePath of mediaPaths) {
+      const sourcePath = join(checkoutPath, relativePath);
+      if (!existsSync(sourcePath)) {
+        throw new Error(`Referenced media artifact does not exist: ${relativePath}`);
+      }
+      const destinationPath = join(tempRepo, mediaBranchPath(pr, relativePath));
+      mkdirSync(dirname(destinationPath), { recursive: true });
+      copyFileSync(sourcePath, destinationPath);
+    }
+
+    git(["add", ...mediaPaths.map((relativePath) => mediaBranchPath(pr, relativePath))]);
+    const status = git(["status", "--short"]).trim();
+    if (!status) return;
+    git(["commit", "-m", `Sync PR media artifacts from ${pr.branch}`]);
+    git(["push", "-u", "origin", PR_MEDIA_BRANCH]);
+  } finally {
+    rmSync(tempRepo, { recursive: true, force: true });
+  }
 }
 
 /**
@@ -281,6 +378,7 @@ async function publishToGitHub(
   } catch {
     runGit(["push", "origin", "HEAD"]);
   }
+  syncMediaArtifactsToMediaBranch(checkoutPath, pr, state.description || "");
 
   // 2. Create or find existing PR
   console.log("Creating/finding PR...");

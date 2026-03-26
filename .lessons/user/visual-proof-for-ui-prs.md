@@ -9,7 +9,7 @@
 - Build and run the app in the simulator before creating a PR that touches UI code.
 - Capture screenshots for static changes and screen recordings for interactive changes.
 - Inspect captured media for visual bugs: incorrect fill states, clipped text, low-contrast elements, misaligned spacing, data/visual mismatches.
-- Commit media to the PR branch (e.g. `.github/pr-media/`) and link in the PR description using blob URLs.
+- Store all screenshots and screen recordings under `.ironsha/pr-media/`, sync them to the `pr-media` branch under `pr-media/{worktree-name}/`, and link the resulting blob URLs in the PR description.
 - Do not submit a UI PR without visual evidence of the change.
 
 ---

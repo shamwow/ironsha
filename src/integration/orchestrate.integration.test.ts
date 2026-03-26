@@ -59,7 +59,7 @@ function createMockClaudeScript(): string {
   return [
     "#!/usr/bin/env node",
     'const { mkdirSync, writeFileSync } = require("node:fs");',
-    'const { join } = require("node:path");',
+    'const { basename, join } = require("node:path");',
     "",
     "async function readStdin() {",
     "  const chunks = [];",
@@ -113,7 +113,7 @@ function createMockClaudeScript(): string {
     "}",
     "",
     "function writeVisualEvidence() {",
-    '  const artifactDir = join(process.cwd(), "qa", "artifacts");',
+    '  const artifactDir = join(process.cwd(), ".ironsha", "pr-media");',
     "  mkdirSync(artifactDir, { recursive: true });",
     '  writeFileSync(join(artifactDir, "mock-ui-screenshot.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yh1cAAAAASUVORK5CYII=", "base64"));',
     '  writeFileSync(join(artifactDir, "mock-ui-demo.mp4"), Buffer.from("AAAAIGZ0eXBpc29tAAAAAGlzb21pc28yYXZjMW1wNDEAABBtb292AAAAbG12aGQAAAAAAAAAAAAAAAAAAAPoAAAD6AABAAABAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACc3RibAAAAAAAAAABAAABH21kYXQAAAAA", "base64"));',
@@ -172,8 +172,8 @@ function createMockClaudeScript(): string {
     '        "- Run `node scripts/verify-task.js`",',
     '        "",',
     '        "**Visual evidence**",',
-    '        "- Screenshot: ![Mock UI screenshot](./qa/artifacts/mock-ui-screenshot.png)",',
-    '        "- Video: [Mock UI demo recording](./qa/artifacts/mock-ui-demo.mp4)",',
+    '        "- Screenshot: ![Mock UI screenshot](./.ironsha/pr-media/mock-ui-screenshot.png)",',
+    '        "- Video: [Mock UI demo recording](./.ironsha/pr-media/mock-ui-demo.mp4)",',
     '      ].join("\\n"),',
     '    }));',
     "    return;",
@@ -212,7 +212,7 @@ function createMockCodexScript(): string {
   return [
     "#!/usr/bin/env node",
     'const { mkdirSync, readFileSync, writeFileSync } = require("node:fs");',
-    'const { dirname, join } = require("node:path");',
+    'const { basename, dirname, join } = require("node:path");',
     "",
     "async function readStdin() {",
     "  const chunks = [];",
@@ -268,7 +268,7 @@ function createMockCodexScript(): string {
     "}",
     "",
     "function writeVisualEvidence() {",
-    '  const artifactDir = join(process.cwd(), "qa", "artifacts");',
+    '  const artifactDir = join(process.cwd(), ".ironsha", "pr-media");',
     "  mkdirSync(artifactDir, { recursive: true });",
     '  writeFileSync(join(artifactDir, "mock-ui-screenshot.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yh1cAAAAASUVORK5CYII=", "base64"));',
     '  writeFileSync(join(artifactDir, "mock-ui-demo.mp4"), Buffer.from("AAAAIGZ0eXBpc29tAAAAAGlzb21pc28yYXZjMW1wNDEAABBtb292AAAAbG12aGQAAAAAAAAAAAAAAAAAAAPoAAAD6AABAAABAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACc3RibAAAAAAAAAABAAABH21kYXQAAAAA", "base64"));',
@@ -320,8 +320,8 @@ function createMockCodexScript(): string {
     '        "- Run `node scripts/verify-task.js`",',
     '        "",',
     '        "**Visual evidence**",',
-    '        "- Screenshot: ![Mock UI screenshot](./qa/artifacts/mock-ui-screenshot.png)",',
-    '        "- Video: [Mock UI demo recording](./qa/artifacts/mock-ui-demo.mp4)",',
+    '        "- Screenshot: ![Mock UI screenshot](./.ironsha/pr-media/mock-ui-screenshot.png)",',
+    '        "- Video: [Mock UI demo recording](./.ironsha/pr-media/mock-ui-demo.mp4)",',
     '      ].join("\\n"),',
     '    });',
     '  } else if (prompt.includes("Perform BOTH architecture and detailed review in a single pass.")) {',
@@ -525,8 +525,8 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
       assert.equal(prData.number, prNumber);
       assert.equal(prData.baseRefName, live.baseBranch);
       assert.equal(prData.title, "Complete the requested task in src/task.txt");
-      const expectedScreenshotUrl = `https://github.com/${live.repo}/blob/${prData.headRefName}/qa/artifacts/mock-ui-screenshot.png?raw=true`;
-      const expectedVideoUrl = `https://github.com/${live.repo}/blob/${prData.headRefName}/qa/artifacts/mock-ui-demo.mp4`;
+      const expectedScreenshotUrl = `https://github.com/${live.repo}/blob/pr-media/pr-media/${prData.headRefName}/.ironsha/pr-media/mock-ui-screenshot.png?raw=true`;
+      const expectedVideoUrl = `https://github.com/${live.repo}/blob/pr-media/pr-media/${prData.headRefName}/.ironsha/pr-media/mock-ui-demo.mp4`;
       assert.match(prData.body, /\*\*Summary\*\*/);
       assert.match(prData.body, /`src\/task\.txt`/);
       assert.match(prData.body, /`node scripts\/verify-task\.js`/);
@@ -656,16 +656,17 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
         { cwd: fixture.repoPath, encoding: "utf8" },
       ).trim();
       assert.equal(pushedTaskContents, "Task completed by mock implementer.");
+      execSync(`git fetch origin pr-media`, { cwd: fixture.repoPath, stdio: "pipe" });
       const pushedScreenshot = execSync(
-        `git show FETCH_HEAD:qa/artifacts/mock-ui-screenshot.png`,
+        `git show FETCH_HEAD:pr-media/${prData.headRefName}/.ironsha/pr-media/mock-ui-screenshot.png`,
         { cwd: fixture.repoPath, stdio: "pipe" },
       );
-      assert.ok(pushedScreenshot.length > 0, "Expected pushed branch to include the mock screenshot artifact");
+      assert.ok(pushedScreenshot.length > 0, "Expected pr-media branch to include the mock screenshot artifact");
       const pushedVideo = execSync(
-        `git show FETCH_HEAD:qa/artifacts/mock-ui-demo.mp4`,
+        `git show FETCH_HEAD:pr-media/${prData.headRefName}/.ironsha/pr-media/mock-ui-demo.mp4`,
         { cwd: fixture.repoPath, stdio: "pipe" },
       );
-      assert.ok(pushedVideo.length > 0, "Expected pushed branch to include the mock video artifact");
+      assert.ok(pushedVideo.length > 0, "Expected pr-media branch to include the mock video artifact");
     },
   );
 });
