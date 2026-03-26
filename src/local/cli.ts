@@ -38,6 +38,10 @@ function passLabelForPhase(phase: string | undefined): PassLabel {
   return phase === "qa" ? "agent-qa-review-passed" : "agent-code-review-passed";
 }
 
+function reviewerFooterRole(phase: ReviewPhase | undefined): "code-reviewer" | "qa-reviewer" {
+  return phase === "qa" ? "qa-reviewer" : "code-reviewer";
+}
+
 function parseReviewPhase(value: string | undefined): ReviewPhase | undefined {
   if (!value) return undefined;
   if (value === "code" || value === "qa") return value;
@@ -425,6 +429,7 @@ async function publishToGitHub(
 
   // 3. Fetch PR diff for comment validation
   let diffableLines = new Map<string, Set<number>>();
+  let headSha = "";
   try {
     const filesJson = runGh(
       ["api", `${repoPath}/pulls/${prNumber}/files`, "--paginate"],
@@ -439,18 +444,28 @@ async function publishToGitHub(
   } catch {
     console.error("  Could not fetch PR files for comment validation.");
   }
+  try {
+    headSha = runGh(
+      ["api", `${repoPath}/pulls/${prNumber}`, "--jq", ".head.sha"],
+      devEnv,
+      { encoding: "utf-8" },
+    ).trim();
+  } catch {
+    console.error("  Could not fetch PR head SHA for inline comments.");
+  }
 
   // 4. Post all reviews with inline comments
   const deferredSummaryReviews: typeof state.reviews = [];
   for (const review of state.reviews) {
     console.log(`Posting review ${review.id.slice(0, 8)} (${review.event})...`);
+    const footerRole = reviewerFooterRole(review.phase);
 
     if (review.comments.length > 0) {
       // Build the review payload with footers, validating against diff
       const rawComments = review.comments.map((c) => ({
         path: c.path as string | null,
         line: c.line as number | null,
-        body: c.body + makeFooter(c.id, review.id, "reviewer"),
+        body: c.body + makeFooter(c.id, review.id, footerRole),
       }));
       const { comments: validatedComments, adjustedCount } = validateComments(rawComments, diffableLines);
       if (adjustedCount > 0) {
@@ -459,61 +474,51 @@ async function publishToGitHub(
       // Separate inline and general comments
       const inlineComments = validatedComments.filter((c) => c.path !== null && c.line !== null);
       const generalComments = validatedComments.filter((c) => c.path === null || c.line === null);
-      const comments = inlineComments.map((c) => ({ path: c.path!, line: c.line!, body: c.body }));
       const summaryBody = review.body
-        ? review.body + makeFooter(review.id, review.id, "reviewer")
+        ? review.body + makeFooter(review.id, review.id, footerRole)
         : "";
-      const payload = JSON.stringify({
-        body: summaryBody,
-        event: review.event,
-        comments,
-      });
-      try {
-        runGh(
-          ["api", `${repoPath}/pulls/${prNumber}/reviews`, "--input", "-"],
-          botEnv,
-          { input: payload },
-        );
-      } catch {
-        // If batch fails, post summary + comments individually
-        console.error(`  Batch review failed, posting individually...`);
-        if (review.body) {
-          const summaryPayload = JSON.stringify({
-            body: summaryBody,
-            event: "COMMENT",
-            comments: [],
-          });
-          try {
-            runGh(
-              ["api", `${repoPath}/pulls/${prNumber}/reviews`, "--input", "-"],
-              botEnv,
-              { input: summaryPayload },
-            );
-          } catch { /* skip */ }
+      if (review.body) {
+        const summaryPayload = JSON.stringify({
+          body: summaryBody,
+          event: review.event,
+          comments: [],
+        });
+        try {
+          runGh(
+            ["api", `${repoPath}/pulls/${prNumber}/reviews`, "--input", "-"],
+            botEnv,
+            { input: summaryPayload },
+          );
+        } catch {
+          console.error(`  Failed to post review summary ${review.id.slice(0, 8)}, continuing with comments...`);
         }
-        for (const c of comments) {
-          try {
-            const singlePayload = JSON.stringify({
-              body: "",
-              event: "COMMENT",
-              comments: [c],
-            });
-            runGh(
-              ["api", `${repoPath}/pulls/${prNumber}/reviews`, "--input", "-"],
-              botEnv,
-              { input: singlePayload },
-            );
-          } catch {
-            // Fall back to issue comment
-            const fallbackPayload = JSON.stringify({
-              body: `**${c.path}:${c.line}**\n\n${c.body}`,
-            });
-            runGh(
-              ["api", `${repoPath}/issues/${prNumber}/comments`, "--input", "-"],
-              botEnv,
-              { input: fallbackPayload },
-            );
+      }
+      for (const c of inlineComments) {
+        try {
+          if (!headSha) {
+            throw new Error("Missing PR head SHA");
           }
+          const inlinePayload = JSON.stringify({
+            body: c.body,
+            commit_id: headSha,
+            path: c.path!,
+            line: c.line!,
+            side: "RIGHT",
+          });
+          runGh(
+            ["api", `${repoPath}/pulls/${prNumber}/comments`, "--input", "-"],
+            botEnv,
+            { input: inlinePayload },
+          );
+        } catch {
+          const fallbackPayload = JSON.stringify({
+            body: `**${c.path}:${c.line}**\n\n${c.body}`,
+          });
+          runGh(
+            ["api", `${repoPath}/issues/${prNumber}/comments`, "--input", "-"],
+            botEnv,
+            { input: fallbackPayload },
+          );
         }
       }
 
@@ -651,9 +656,10 @@ async function publishToGitHub(
 
   // 8. Post deferred summary-only reviews after replies/reactions so the timeline reads naturally.
   for (const review of deferredSummaryReviews) {
+      const footerRole = reviewerFooterRole(review.phase);
       // Summary-only review (preserves APPROVE/COMMENT/REQUEST_CHANGES from local state)
       const payload = JSON.stringify({
-        body: review.body + makeFooter(review.id, review.id, "reviewer"),
+        body: review.body + makeFooter(review.id, review.id, footerRole),
         event: review.event,
         comments: [],
       });
@@ -666,7 +672,7 @@ async function publishToGitHub(
       } catch {
         // APPROVE with body can fail if the review was already submitted; try as COMMENT
         const fallbackPayload = JSON.stringify({
-          body: review.body + makeFooter(review.id, review.id, "reviewer"),
+          body: review.body + makeFooter(review.id, review.id, footerRole),
           event: "COMMENT",
           comments: [],
         });

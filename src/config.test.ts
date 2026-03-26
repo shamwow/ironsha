@@ -12,7 +12,6 @@ test("readConfig defaults", () => {
 
   assert.equal(appConfig.CLAUDE_MODEL, "claude-opus-4-6");
   assert.equal(appConfig.CODEX_MODEL, "gpt-5.4");
-  assert.equal(appConfig.REVIEW_PROVIDER, "claude");
 });
 
 test("resolveProviderModel returns the configured Claude model", () => {

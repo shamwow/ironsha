@@ -27,33 +27,12 @@ function optionalNumericEnvFrom(
   return parsed;
 }
 
-function optionalProviderEnvFrom(
-  name: string,
-  fallback: AgentProvider,
-  env: NodeJS.ProcessEnv,
-): AgentProvider {
-  const raw = env[name];
-  if (!raw) return fallback;
-  if (raw === "claude" || raw === "codex") return raw;
-  throw new Error(
-    `Environment variable ${name} must be one of: claude, codex. Got: "${raw}"`,
-  );
-}
-
 export function readConfig(env: NodeJS.ProcessEnv = process.env) {
   return {
     GITHUB_TOKEN: optionalEnvFrom("GITHUB_TOKEN", "", env),
     ANTHROPIC_API_KEY: optionalEnvFrom("ANTHROPIC_API_KEY", "", env),
     CLAUDE_MODEL: optionalEnvFrom("CLAUDE_MODEL", "claude-opus-4-6", env),
     CODEX_MODEL: optionalEnvFrom("CODEX_MODEL", "gpt-5.4", env),
-    REVIEW_PROVIDER: optionalProviderEnvFrom("REVIEW_PROVIDER", "claude", env),
-    MAX_REVIEW_TURNS: optionalNumericEnvFrom("MAX_REVIEW_TURNS", 30, env),
-    REVIEW_TIMEOUT_MS: optionalNumericEnvFrom("REVIEW_TIMEOUT_MS", 600_000, env),
-    TRANSCRIPT_DIR: optionalEnvFrom(
-      "TRANSCRIPT_DIR",
-      "/tmp/ironsha/transcripts",
-      env,
-    ),
   } as const;
 }
 

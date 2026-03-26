@@ -1,7 +1,7 @@
 export function makeFooter(
   threadId: string,
   reviewId?: string,
-  role?: "reviewer" | "writer",
+  role?: "reviewer" | "code-reviewer" | "qa-reviewer" | "writer",
 ): string {
   const parts: string[] = [];
   if (role) parts.push(role);

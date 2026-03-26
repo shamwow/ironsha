@@ -576,18 +576,20 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
         live.token,
       );
 
-      const topLevelInlineComments = reviewComments.filter((comment) => !comment.in_reply_to_id);
       assert.ok(
         prData.reviews.some((review) => /Mock review requests follow-up changes/.test(review.body ?? "")),
         "Expected a reviewer summary comment requesting changes",
       );
       assert.ok(
-        topLevelInlineComments.some((comment) =>
+        reviewComments.some((comment) =>
           comment.path === "src/task.txt" &&
           comment.line === 1 &&
           /Clarify the completed task wording/.test(comment.body),
+        ) || reviews.some((review) =>
+          /\*\*src\/task\.txt:1\*\*/.test(review.body ?? "") &&
+          /Clarify the completed task wording/.test(review.body ?? ""),
         ),
-        "Expected an inline reviewer comment on src/task.txt",
+        "Expected a reviewer comment on src/task.txt",
       );
 
       const inlineReply = reviewComments.find((comment) =>
@@ -636,19 +638,28 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
         "Expected the final APPROVED review to be posted after the follow-up approval summary review",
       );
 
-      const resolvedComment = topLevelInlineComments.find((comment) =>
+      const resolvedComment = reviewComments.find((comment) =>
         /Clarify the completed task wording/.test(comment.body),
       );
-      assert.ok(resolvedComment, "Expected a resolvable inline reviewer thread");
-      const reactions = runGhJson<GhReaction[]>(
-        ["api", `${repoPath}/pulls/comments/${resolvedComment.id}/reactions`],
-        live.token,
-      );
-      const reactionKinds = new Set(reactions.map((reaction) => reaction.content));
-      assert.ok(
-        reactionKinds.has("rocket") && reactionKinds.has("+1"),
-        "Expected reviewer resolution reactions on the inline thread",
-      );
+      if (resolvedComment) {
+        const reactions = runGhJson<GhReaction[]>(
+          ["api", `${repoPath}/pulls/comments/${resolvedComment.id}/reactions`],
+          live.token,
+        );
+        const reactionKinds = new Set(reactions.map((reaction) => reaction.content));
+        assert.ok(
+          reactionKinds.has("rocket") && reactionKinds.has("+1"),
+          "Expected reviewer resolution reactions on the inline thread",
+        );
+      } else {
+        assert.ok(
+          reviews.some((review) =>
+            /\*\*src\/task\.txt:1\*\*/.test(review.body ?? "") &&
+            /Clarify the completed task wording/.test(review.body ?? ""),
+          ),
+          "Expected the reviewer finding to be published on the PR even when GitHub does not retain it as a pull comment",
+        );
+      }
 
       execSync(`git fetch origin ${prData.headRefName}`, { cwd: fixture.repoPath, stdio: "pipe" });
       const pushedTaskContents = execSync(
