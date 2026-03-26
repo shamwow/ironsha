@@ -336,6 +336,7 @@ async function publishToGitHub(
   }
 
   // 4. Post all reviews with inline comments
+  const deferredSummaryReviews: typeof state.reviews = [];
   for (const review of state.reviews) {
     console.log(`Posting review ${review.id.slice(0, 8)} (${review.event})...`);
 
@@ -427,6 +428,124 @@ async function publishToGitHub(
         } catch { /* skip */ }
       }
     } else if (review.body) {
+      deferredSummaryReviews.push(review);
+    }
+
+  }
+
+  // 5. Fetch all GitHub PR review comments and issue comments for matching local → GitHub IDs.
+  // Used for replies and resolved reactions.
+  let ghComments: Array<{ id: number; path: string; line: number | null; body: string }> = [];
+  let ghIssueComments: Array<{ id: number; body: string }> = [];
+  try {
+    const commentsJson = runGh(
+      ["api", `${repoPath}/pulls/${prNumber}/comments`, "--paginate"],
+      devEnv,
+      { encoding: "utf-8" },
+    );
+    // --paginate concatenates JSON arrays: [...][...] — merge into one array
+    const raw = commentsJson.trim();
+    ghComments = JSON.parse(raw.replace(/\]\s*\[/g, ","));
+  } catch {
+    console.error("  Could not fetch PR comments for thread matching.");
+  }
+  try {
+    const issueCommentsJson = runGh(
+      ["api", `${repoPath}/issues/${prNumber}/comments`, "--paginate"],
+      devEnv,
+      { encoding: "utf-8" },
+    );
+    const raw = issueCommentsJson.trim();
+    ghIssueComments = JSON.parse(raw.replace(/\]\s*\[/g, ","));
+  } catch {
+    console.error("  Could not fetch issue comments for thread matching.");
+  }
+
+  // 6. Post thread replies as the developer (writer role)
+  for (const review of state.reviews) {
+    for (const comment of review.comments) {
+      for (const reply of comment.replies) {
+        console.log(`  Posting reply to ${comment.id.slice(0, 8)}...`);
+        const replyBody = reply.body + makeFooter(comment.id, undefined, "writer");
+
+        // Find the GitHub comment ID via thread:: tag to post an inline reply
+        const match = ghComments.find(
+          (gc) => gc.body.includes(`thread::${comment.id}`),
+        );
+        if (match) {
+          try {
+            runGh(
+              ["api", `${repoPath}/pulls/${prNumber}/comments/${match.id}/replies`, "--input", "-"],
+              devEnv,
+              { input: JSON.stringify({ body: replyBody }) },
+            );
+            continue;
+          } catch { /* fall through to issue comment */ }
+        }
+
+        // Fallback or general thread: post as top-level issue comment with context
+        const context = comment.path !== null && comment.line !== null
+          ? `${comment.path}:${comment.line}`
+          : "general";
+        const fallbackBody = `> Re: ${context}\n\n${replyBody}`;
+        runGh(
+          ["api", `${repoPath}/issues/${prNumber}/comments`, "--input", "-"],
+          devEnv,
+          { input: JSON.stringify({ body: fallbackBody }) },
+        );
+      }
+    }
+  }
+
+  // 7. Post resolved reactions
+  const resolvedIds = await backend.fetchResolvedThreadIds(pr);
+  if (resolvedIds.size > 0) {
+    console.log(`Posting reactions for ${resolvedIds.size} resolved comment(s)...`);
+    for (const review of state.reviews) {
+      for (const comment of review.comments) {
+        if (!resolvedIds.has(comment.id)) continue;
+
+        const match = ghComments.find(
+          (gc) => gc.body.includes(`thread::${comment.id}`),
+        );
+        if (match) {
+          for (const reaction of ["rocket", "+1"] as const) {
+            try {
+              runGh(
+                ["api", `${repoPath}/pulls/comments/${match.id}/reactions`, "--input", "-"],
+                botEnv,
+                { input: JSON.stringify({ content: reaction }) },
+              );
+            } catch { /* reaction may already exist */ }
+          }
+          console.log(`  Reacted on ${comment.path ?? "general"}:${comment.line ?? "-"}`);
+          continue;
+        }
+
+        const issueMatch = ghIssueComments.find(
+          (gc) => gc.body.includes(`thread::${comment.id}`),
+        );
+        if (issueMatch) {
+          for (const reaction of ["rocket", "+1"] as const) {
+            try {
+              runGh(
+                ["api", `${repoPath}/issues/comments/${issueMatch.id}/reactions`, "--input", "-"],
+                botEnv,
+                { input: JSON.stringify({ content: reaction }) },
+              );
+            } catch { /* reaction may already exist */ }
+          }
+          console.log(`  Reacted on fallback/general thread ${comment.id.slice(0, 8)}`);
+          continue;
+        }
+
+        console.error(`  Could not match comment ${comment.id.slice(0, 8)} to GitHub.`);
+      }
+    }
+  }
+
+  // 8. Post deferred summary-only reviews after replies/reactions so the timeline reads naturally.
+  for (const review of deferredSummaryReviews) {
       // Summary-only review (preserves APPROVE/COMMENT/REQUEST_CHANGES from local state)
       const payload = JSON.stringify({
         body: review.body + makeFooter(review.id, review.id, "reviewer"),
@@ -458,88 +577,7 @@ async function publishToGitHub(
       }
     }
 
-  }
-
-  // 5. Fetch all GitHub PR review comments for matching local → GitHub IDs.
-  // Used for both inline replies and resolved reactions.
-  let ghComments: Array<{ id: number; path: string; line: number | null; body: string }> = [];
-  try {
-    const commentsJson = runGh(
-      ["api", `${repoPath}/pulls/${prNumber}/comments`, "--paginate"],
-      devEnv,
-      { encoding: "utf-8" },
-    );
-    // --paginate concatenates JSON arrays: [...][...] — merge into one array
-    const raw = commentsJson.trim();
-    ghComments = JSON.parse(raw.replace(/\]\s*\[/g, ","));
-  } catch {
-    console.error("  Could not fetch PR comments for thread matching.");
-  }
-
-  // 6. Post inline thread replies as the developer (writer role)
-  for (const review of state.reviews) {
-    for (const comment of review.comments) {
-      for (const reply of comment.replies) {
-        console.log(`  Posting reply to ${comment.id.slice(0, 8)}...`);
-        const replyBody = reply.body + makeFooter(comment.id, undefined, "writer");
-
-        // Find the GitHub comment ID via thread:: tag to post an inline reply
-        const match = ghComments.find(
-          (gc) => gc.body.includes(`thread::${comment.id}`),
-        );
-        if (match) {
-          try {
-            runGh(
-              ["api", `${repoPath}/pulls/${prNumber}/comments/${match.id}/replies`, "--input", "-"],
-              devEnv,
-              { input: JSON.stringify({ body: replyBody }) },
-            );
-            continue;
-          } catch { /* fall through to issue comment */ }
-        }
-
-        // Fallback: post as top-level issue comment with context
-        const fallbackBody = `> Re: ${comment.path}:${comment.line}\n\n${replyBody}`;
-        runGh(
-          ["api", `${repoPath}/issues/${prNumber}/comments`, "--input", "-"],
-          devEnv,
-          { input: JSON.stringify({ body: fallbackBody }) },
-        );
-      }
-    }
-  }
-
-  // 7. Post resolved reactions
-  const resolvedIds = await backend.fetchResolvedThreadIds(pr);
-  if (resolvedIds.size > 0) {
-    console.log(`Posting reactions for ${resolvedIds.size} resolved comment(s)...`);
-    for (const review of state.reviews) {
-      for (const comment of review.comments) {
-        if (!resolvedIds.has(comment.id)) continue;
-
-        const match = ghComments.find(
-          (gc) => gc.body.includes(`thread::${comment.id}`),
-        );
-        if (!match) {
-          console.error(`  Could not match comment ${comment.id.slice(0, 8)} to GitHub.`);
-          continue;
-        }
-
-        for (const reaction of ["rocket", "+1"] as const) {
-          try {
-            runGh(
-              ["api", `${repoPath}/pulls/comments/${match.id}/reactions`, "--input", "-"],
-              botEnv,
-              { input: JSON.stringify({ content: reaction }) },
-            );
-          } catch { /* reaction may already exist */ }
-        }
-        console.log(`  Reacted on ${comment.path}:${comment.line}`);
-      }
-    }
-  }
-
-  // 8. Set label
+  // 9. Set label
   console.log(`Setting labels: ${[state.label, ...state.passLabels].join(", ")}`);
   const botLabels = [
     "bot-review-needed", "bot-changes-needed",

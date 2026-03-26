@@ -479,15 +479,23 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
         body_html?: string;
         body_text?: string;
       };
+      type GhReview = {
+        id: number;
+        state: string;
+        body?: string | null;
+        submitted_at?: string | null;
+      };
       type GhReviewComment = {
         id: number;
         body: string;
         path?: string;
         line?: number | null;
         in_reply_to_id?: number;
+        created_at?: string;
       };
       type GhIssueComment = {
         body: string;
+        created_at?: string;
       };
       type GhReaction = {
         content: string;
@@ -551,6 +559,10 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
         ["api", `${repoPath}/pulls/${prNumber}/comments`, "--paginate"],
         live.token,
       );
+      const reviews = runGhJson<GhReview[]>(
+        ["api", `${repoPath}/pulls/${prNumber}/reviews`, "--paginate"],
+        live.token,
+      );
       const issueComments = runGhJson<GhIssueComment[]>(
         ["api", `${repoPath}/issues/${prNumber}/comments`, "--paginate"],
         live.token,
@@ -578,6 +590,42 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
       assert.ok(
         issueComments.some((comment) => /Addressed review thread/.test(comment.body)),
         "Expected an author fallback comment response on the PR",
+      );
+
+      const followUpApprovalReview = reviews.find((review) =>
+        /Mock review approval after follow-up/.test(review.body ?? ""),
+      );
+      assert.ok(followUpApprovalReview?.submitted_at, "Expected a follow-up review summary with a timestamp");
+      const finalApprovalReview = reviews.find((review) =>
+        review.state === "APPROVED" &&
+        /Automated code review and QA review passed/.test(review.body ?? ""),
+      );
+      assert.ok(finalApprovalReview?.submitted_at, "Expected the final approval review with a timestamp");
+      assert.ok(inlineReply.created_at, "Expected the inline author reply to have a creation timestamp");
+      const fallbackReply = issueComments.find((comment) => /Addressed review thread/.test(comment.body));
+      assert.ok(fallbackReply?.created_at, "Expected the fallback author reply to have a creation timestamp");
+
+      const inlineReplyTime = Date.parse(inlineReply.created_at!);
+      const fallbackReplyTime = Date.parse(fallbackReply.created_at!);
+      const followUpApprovalTime = Date.parse(followUpApprovalReview.submitted_at!);
+      const finalApprovalTime = Date.parse(finalApprovalReview.submitted_at!);
+
+      assert.ok(
+        Number.isFinite(inlineReplyTime) && Number.isFinite(fallbackReplyTime) &&
+          Number.isFinite(followUpApprovalTime) && Number.isFinite(finalApprovalTime),
+        "Expected valid timestamps for reply and approval events",
+      );
+      assert.ok(
+        inlineReplyTime <= followUpApprovalTime,
+        "Expected inline author replies to be posted before the follow-up approval summary review",
+      );
+      assert.ok(
+        fallbackReplyTime <= followUpApprovalTime,
+        "Expected fallback author replies to be posted before the follow-up approval summary review",
+      );
+      assert.ok(
+        followUpApprovalTime <= finalApprovalTime,
+        "Expected the final APPROVED review to be posted after the follow-up approval summary review",
       );
 
       const resolvedComment = topLevelInlineComments.find((comment) =>

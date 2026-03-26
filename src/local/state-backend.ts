@@ -100,12 +100,11 @@ export class LocalStateBackend implements StateBackend {
     event: "COMMENT" | "REQUEST_CHANGES" | "APPROVE",
   ): Promise<void> {
     const now = new Date().toISOString();
-    const inlineComments: LocalReviewComment[] = comments
-      .filter((c) => c.path !== null && c.line !== null)
+    const persistedComments: LocalReviewComment[] = comments
       .map((c) => ({
         id: randomUUID(),
-        path: c.path!,
-        line: c.line!,
+        path: c.path,
+        line: c.line,
         body: c.body,
         author: BOT_LOGIN,
         reactions: [],
@@ -118,7 +117,7 @@ export class LocalStateBackend implements StateBackend {
       body: summary,
       event,
       author: BOT_LOGIN,
-      comments: inlineComments,
+      comments: persistedComments,
       createdAt: now,
     };
 
@@ -254,9 +253,10 @@ export class LocalStateBackend implements StateBackend {
     for (const review of this.state.reviews) {
       for (const comment of review.comments) {
         const status = resolved.has(comment.id) ? "RESOLVED" : "UNRESOLVED";
-        lines.push(
-          `### Thread ${comment.id} (${status}) — inline on ${comment.path}:${comment.line}`,
-        );
+        const location = comment.path !== null && comment.line !== null
+          ? `inline on ${comment.path}:${comment.line}`
+          : "general comment";
+        lines.push(`### Thread ${comment.id} (${status}) — ${location}`);
         lines.push(`> ${comment.body}`);
 
         if (comment.replies.length > 0) {

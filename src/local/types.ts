@@ -26,8 +26,8 @@ export interface LocalCommentReply {
 
 export interface LocalReviewComment {
   id: string;
-  path: string;
-  line: number;
+  path: string | null;
+  line: number | null;
   body: string;
   author: string;
   reactions: LocalReaction[];
