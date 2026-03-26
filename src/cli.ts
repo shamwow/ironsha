@@ -175,7 +175,7 @@ function ensureLogDir(baseDir?: string): string {
     if (!baseDir) {
       throw new Error("Transcript directory requested before worktree log root was configured.");
     }
-    logDir = join(baseDir, ".ironsha", "logs", `build-${Date.now()}`);
+    logDir = join(baseDir, ".ironsha", "logs");
     mkdirSync(logDir, { recursive: true });
   }
   return logDir;
