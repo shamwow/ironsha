@@ -1187,27 +1187,11 @@ async function runCodeReviewPhase(
 
   const baseBranch = "main";
   const platform = detectPlatformFromDiff(cwd, baseBranch);
-  const basePrompt = readPromptFile("base.md")
-    .replace(
-      "You have access to the GitHub MCP server — use it to list PR review comments, read thread conversations, and understand the current review state",
-      "All review thread state is provided below. Do NOT use GitHub MCP tools.",
-    )
-    .replace(
-      "Use the GitHub MCP tools to list review comments on this PR",
-      "Review the thread state provided below",
-    );
+  const basePrompt = readPromptFile("base.md");
   const archPrompt = readPromptFile("architecture-pass.md");
   const detailedPrompt = readPromptFile("detailed-pass.md");
   const guideContent = platform ? readGuide(platform) : "";
-  const codeFixPrompt = readPromptFile("code-fix.md")
-    .replace(
-      "You have access to the GitHub MCP server — use it to list PR review comments, read thread conversations, and understand what changes are requested",
-      "All review thread state is provided below. Do NOT use GitHub MCP tools.",
-    )
-    .replace(
-      "Use the GitHub MCP tools to list all review comments and threads on this PR",
-      "Review the thread state provided below",
-    );
+  const codeFixPrompt = readPromptFile("code-fix.md");
 
   await runReviewFixLoop(cwd, {
     logPhase: "PR-REVIEW",
