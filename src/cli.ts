@@ -215,12 +215,21 @@ export function formatSubprocessFailure(
   const outputText = output.trim();
   const combined = `${stderrText}\n${outputText}`;
   const claudeRetryCount = (combined.match(/"subtype":"api_retry"/g) ?? []).length;
+  const claudeMaxTurnsExceeded = /"subtype":"error_max_turns"/.test(combined);
 
   if (command === "claude" && claudeRetryCount >= 3) {
     return [
       "claude could not complete the request after repeated API retries.",
       "This usually means your Claude usage is exhausted or the provider is temporarily unavailable.",
       "Check your Claude usage/quota and retry later.",
+    ].join("\n");
+  }
+
+  if (command === "claude" && claudeMaxTurnsExceeded) {
+    return [
+      "claude exceeded its turn budget for this invocation.",
+      "The invocation was retried once and still exceeded the turn budget.",
+      "Reduce task scope or raise the max turn budget if this keeps happening.",
     ].join("\n");
   }
 
@@ -235,116 +244,99 @@ export function formatSubprocessFailure(
   return parts.join("\n");
 }
 
+async function runLlmModeWithRetry(
+  llm: LlmConfig,
+  prompt: string,
+  cwd: string,
+  phase: string,
+  mode: "print" | "agentic",
+): Promise<string> {
+  const maxAttempts = llm.provider === "claude" ? 2 : 1;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const spec = await buildProviderInvocation({
+      provider: llm.provider,
+      model: llm.model,
+      mode,
+      maxTurns: MAX_TURNS,
+    });
+    const transcript = openTranscriptStreams(phase);
+    log("SUBPROCESS", `${spec.command} ${spec.args.join(" ")}`);
+    log("SUBPROCESS", `Transcript: ${transcript.stdoutPath}`);
+
+    try {
+      return await new Promise((resolve, reject) => {
+        const child = spawn(spec.command, spec.args, {
+          cwd,
+          env: spec.env,
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+        const collector = new ProviderOutputCollector(spec, false);
+
+        child.stdout.on("data", (data: Buffer) => {
+          transcript.stdout.write(data);
+          collector.handleStdout(data);
+          if (collector.shouldAbortForProviderFailure()) {
+            child.kill("SIGTERM");
+          }
+        });
+        child.stderr.on("data", (data: Buffer) => {
+          collector.handleStderr(data);
+          transcript.stderr.write(data);
+        });
+
+        child.stdin.write(buildProviderInput(spec, prompt));
+        child.stdin.end();
+
+        child.on("close", async (code) => {
+          const output = await collector.finalize();
+          const shouldRetryForMaxTurns = collector.shouldRetryForMaxTurns();
+          await collector.cleanup();
+          transcript.stdout.end();
+          transcript.stderr.end();
+          if (code === 0) {
+            resolve(output);
+            return;
+          }
+          if (
+            llm.provider === "claude"
+            && shouldRetryForMaxTurns
+            && attempt < maxAttempts
+          ) {
+            log("SUBPROCESS", `Claude exceeded max turns during ${phase}; retrying once.`);
+            resolve(await runLlmModeWithRetry(llm, prompt, cwd, phase, mode));
+            return;
+          }
+          reject(new Error(formatSubprocessFailure(spec.command, code, collector.getStderr(), output)));
+        });
+
+        child.on("error", async (err) => {
+          await collector.cleanup();
+          reject(err);
+        });
+      });
+    } catch (err) {
+      if (attempt >= maxAttempts) {
+        throw err;
+      }
+    }
+  }
+
+  throw new Error(`Unexpected ${mode} invocation retry failure.`);
+}
+
 /**
  * Run an LLM in print mode: pipe prompt via stdin, capture and return stdout.
  */
 async function runPrintMode(llm: LlmConfig, prompt: string, cwd: string, phase: string = "print"): Promise<string> {
-  const spec = await buildProviderInvocation({
-    provider: llm.provider,
-    model: llm.model,
-    mode: "print",
-    maxTurns: MAX_TURNS,
-  });
-  const transcript = openTranscriptStreams(phase);
-  log("SUBPROCESS", `${spec.command} ${spec.args.join(" ")}`);
-  log("SUBPROCESS", `Transcript: ${transcript.stdoutPath}`);
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(spec.command, spec.args, {
-      cwd,
-      env: spec.env,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    const collector = new ProviderOutputCollector(spec, false);
-
-    child.stdout.on("data", (data: Buffer) => {
-      transcript.stdout.write(data);
-      collector.handleStdout(data);
-      if (collector.shouldAbortForProviderFailure()) {
-        child.kill("SIGTERM");
-      }
-    });
-    child.stderr.on("data", (data: Buffer) => {
-      collector.handleStderr(data);
-      transcript.stderr.write(data);
-    });
-
-    child.stdin.write(buildProviderInput(spec, prompt));
-    child.stdin.end();
-
-    child.on("close", async (code) => {
-      const output = await collector.finalize();
-      await collector.cleanup();
-      transcript.stdout.end();
-      transcript.stderr.end();
-      if (code === 0) {
-        resolve(output);
-      } else {
-        reject(new Error(formatSubprocessFailure(spec.command, code, collector.getStderr(), output)));
-      }
-    });
-
-    child.on("error", async (err) => {
-      await collector.cleanup();
-      reject(err);
-    });
-  });
+  return runLlmModeWithRetry(llm, prompt, cwd, phase, "print");
 }
 
 /**
  * Run an LLM in agentic mode: pipe prompt via stdin and capture output in transcripts.
  */
 async function runAgenticMode(llm: LlmConfig, prompt: string, cwd: string, phase: string = "agentic"): Promise<string> {
-  const spec = await buildProviderInvocation({
-    provider: llm.provider,
-    model: llm.model,
-    mode: "agentic",
-    maxTurns: MAX_TURNS,
-  });
-  const transcript = openTranscriptStreams(phase);
-  log("SUBPROCESS", `${spec.command} ${spec.args.join(" ")}`);
-  log("SUBPROCESS", `Transcript: ${transcript.stdoutPath}`);
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(spec.command, spec.args, {
-      cwd,
-      env: spec.env,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    const collector = new ProviderOutputCollector(spec, false);
-
-    child.stdout.on("data", (data: Buffer) => {
-      transcript.stdout.write(data);
-      collector.handleStdout(data);
-      if (collector.shouldAbortForProviderFailure()) {
-        child.kill("SIGTERM");
-      }
-    });
-    child.stderr.on("data", (data: Buffer) => {
-      collector.handleStderr(data);
-      transcript.stderr.write(data);
-    });
-
-    child.stdin.write(buildProviderInput(spec, prompt));
-    child.stdin.end();
-
-    child.on("close", async (code) => {
-      const output = await collector.finalize();
-      await collector.cleanup();
-      transcript.stdout.end();
-      transcript.stderr.end();
-      if (code === 0) {
-        resolve(output);
-      } else {
-        reject(new Error(formatSubprocessFailure(spec.command, code, collector.getStderr(), output)));
-      }
-    });
-
-    child.on("error", async (err) => {
-      await collector.cleanup();
-      reject(err);
-    });
-  });
+  return runLlmModeWithRetry(llm, prompt, cwd, phase, "agentic");
 }
 
 // ---------------------------------------------------------------------------

@@ -55,6 +55,18 @@ test("formatSubprocessFailure surfaces repeated Claude api retries as usage exha
   assert.match(message, /usage is exhausted|provider is temporarily unavailable/i);
 });
 
+test("formatSubprocessFailure surfaces repeated Claude max-turn exhaustion clearly", () => {
+  const message = formatSubprocessFailure(
+    "claude",
+    1,
+    "",
+    '{"type":"result","subtype":"error_max_turns","num_turns":51}',
+  );
+
+  assert.match(message, /exceeded its turn budget/i);
+  assert.match(message, /retried once/i);
+});
+
 test("buildImplementPrompt requires visual evidence handling for React UI diffs", () => {
   const prompt = buildImplementPrompt("# Plan", "react");
 

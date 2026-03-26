@@ -32,10 +32,11 @@ export interface BuildProviderInvocationOptions {
 interface StreamJsonExtraction {
   text: string | null;
   resultText: string | null;
+  maxTurnsExceeded: boolean;
 }
 
 function extractFromStreamJson(line: string): StreamJsonExtraction {
-  if (!line.trim()) return { text: null, resultText: null };
+  if (!line.trim()) return { text: null, resultText: null, maxTurnsExceeded: false };
   try {
     const event = JSON.parse(line);
     if (event.type === "assistant" && event.message?.content) {
@@ -45,7 +46,10 @@ function extractFromStreamJson(line: string): StreamJsonExtraction {
           parts.push(block.text);
         }
       }
-      if (parts.length > 0) return { text: parts.join(""), resultText: null };
+      if (parts.length > 0) return { text: parts.join(""), resultText: null, maxTurnsExceeded: false };
+    }
+    if (event.type === "result" && event.subtype === "error_max_turns") {
+      return { text: null, resultText: null, maxTurnsExceeded: true };
     }
     if (event.type === "result" && event.result) {
       const resultStr = typeof event.result === "string"
@@ -54,12 +58,12 @@ function extractFromStreamJson(line: string): StreamJsonExtraction {
             .filter((b) => b.type === "text")
             .map((b) => b.text ?? "")
             .join("");
-      if (resultStr) return { text: null, resultText: resultStr };
+      if (resultStr) return { text: null, resultText: resultStr, maxTurnsExceeded: false };
     }
   } catch {
     // Ignore invalid lines; the caller still has the raw stdout transcript.
   }
-  return { text: null, resultText: null };
+  return { text: null, resultText: null, maxTurnsExceeded: false };
 }
 
 async function createClaudeMcpConfig(token: string): Promise<string> {
@@ -213,6 +217,7 @@ export class ProviderOutputCollector {
   private textContent = "";
   private resultContent = "";
   private claudeRetryCount = 0;
+  private claudeMaxTurnsExceeded = false;
 
   constructor(
     private readonly spec: ProviderInvocationSpec,
@@ -233,6 +238,9 @@ export class ProviderOutputCollector {
           this.claudeRetryCount++;
         }
         const extracted = extractFromStreamJson(line);
+        if (extracted.maxTurnsExceeded) {
+          this.claudeMaxTurnsExceeded = true;
+        }
         if (extracted.text) {
           this.textContent += extracted.text;
           streamed += extracted.text;
@@ -261,6 +269,7 @@ export class ProviderOutputCollector {
         this.claudeRetryCount++;
       }
       const extracted = extractFromStreamJson(this.lineBuffer);
+      if (extracted.maxTurnsExceeded) this.claudeMaxTurnsExceeded = true;
       if (extracted.text) this.textContent += extracted.text;
       if (extracted.resultText) this.resultContent += extracted.resultText;
       this.lineBuffer = "";
@@ -297,6 +306,10 @@ export class ProviderOutputCollector {
       && this.claudeRetryCount >= 3
       && this.textContent.length === 0
       && this.resultContent.length === 0;
+  }
+
+  shouldRetryForMaxTurns(): boolean {
+    return this.spec.stdoutFormat === "claude-stream-json" && this.claudeMaxTurnsExceeded;
   }
 
   async cleanup(): Promise<void> {

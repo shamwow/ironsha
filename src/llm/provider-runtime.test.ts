@@ -167,3 +167,22 @@ test("ProviderOutputCollector requests early abort after repeated Claude api ret
   assert.equal(collector.shouldAbortForProviderFailure(), true);
   await collector.cleanup();
 });
+
+test("ProviderOutputCollector marks Claude max-turn exhaustion as retryable", async () => {
+  const invocation = await buildProviderInvocation({
+    provider: "claude",
+    model: "claude-sonnet-4-6",
+    mode: "print",
+    maxTurns: 10,
+  });
+  const collector = new ProviderOutputCollector(invocation, false);
+
+  collector.handleStdout(
+    Buffer.from(
+      '{"type":"result","subtype":"error_max_turns","num_turns":51}\n',
+    ),
+  );
+
+  assert.equal(collector.shouldRetryForMaxTurns(), true);
+  await collector.cleanup();
+});
