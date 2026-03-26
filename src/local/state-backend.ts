@@ -10,7 +10,6 @@ import type {
   LocalReview,
   LocalReviewComment,
   PassLabel,
-  StatusLabel,
 } from "./types.js";
 import { parseGitDiffToFilePatches } from "./git-diff-parser.js";
 import { logger } from "../logger.js";
@@ -30,7 +29,6 @@ export class LocalStateBackend implements StateBackend {
     this.state = {
       version: 1,
       pr,
-      label: "bot-review-needed",
       passLabels: [],
       checkoutPath,
       reviews: [],
@@ -51,10 +49,6 @@ export class LocalStateBackend implements StateBackend {
 
   getState(): LocalPRState {
     return this.state;
-  }
-
-  getLabel(): StatusLabel {
-    return this.state.label;
   }
 
   getPassLabels(): PassLabel[] {
@@ -218,11 +212,6 @@ export class LocalStateBackend implements StateBackend {
       }
     }
     return total - resolved.size;
-  }
-
-  async setLabel(_pr: PRInfo, label: string): Promise<void> {
-    this.state.label = label as StatusLabel;
-    await this.persist();
   }
 
   async addPassLabel(_pr: PRInfo, label: PassLabel): Promise<void> {

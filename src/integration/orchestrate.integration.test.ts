@@ -532,11 +532,11 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
       assert.match(prData.body, new RegExp(`!\\[Mock UI screenshot\\]\\(${expectedScreenshotUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`));
       assert.match(prData.body, new RegExp(`\\[Mock UI demo recording\\]\\(${expectedVideoUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`));
       assert.ok(
-        prData.labels.some((label) => label.name === "agent-code-review-passed"),
+        prData.labels.some((label) => label.name === "code-review-passed"),
         "Expected published PR to have the code review pass label",
       );
       assert.ok(
-        prData.labels.some((label) => label.name === "agent-qa-review-passed"),
+        prData.labels.some((label) => label.name === "qa-review-passed"),
         "Expected published PR to have the QA review pass label",
       );
       assert.ok(

@@ -561,7 +561,6 @@ function parsePrDraft(output: string): PrDraft {
 }
 
 type LocalStateSnapshot = {
-  label: string;
   passLabels?: string[];
   description?: string;
 };
@@ -880,7 +879,6 @@ async function runReviewFixLoop(cwd: string, config: ReviewLoopConfig): Promise<
     }
 
     const state = readLocalState(cwd);
-    log(config.logPhase, `Label after review: ${state.label}`);
     log(config.logPhase, `Pass labels after review: ${(state.passLabels ?? []).join(", ") || "(none)"}`);
 
     if (hasPassLabel(cwd, config.passLabel)) {
@@ -961,7 +959,6 @@ async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<
 
   log("PR-REVIEW", "Initializing local state...");
   runStateCmd(cwd, ["init"]);
-  runStateCmd(cwd, ["label", "set", "bot-review-needed"]);
 
   log("PR-REVIEW", "Committing changes...");
   try {
@@ -1019,7 +1016,7 @@ async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<
     fixPhasePrefix: "pr-fix",
     ciPhasePrefix: "pr-ci",
     reviewPhaseFlag: "code",
-    passLabel: "agent-code-review-passed",
+    passLabel: "code-review-passed",
     approvalMessage: "Code review passed. Moving to QA review.",
     reviewPrompt: (threadState, previousIterations) => buildCodeReviewPrompt(
       basePrompt,
@@ -1049,7 +1046,7 @@ async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<
       fixPhasePrefix: "qa-fix",
       ciPhasePrefix: "qa-ci",
       reviewPhaseFlag: "qa",
-      passLabel: "agent-qa-review-passed",
+      passLabel: "qa-review-passed",
       approvalMessage: "QA review passed. Moving to publish.",
       reviewPrompt: (threadState, previousIterations) => buildQaReviewPrompt(
         qaReviewPromptBase,

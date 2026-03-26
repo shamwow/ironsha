@@ -1,15 +1,8 @@
 import type { PRInfo } from "../review/types.js";
 
-export type StatusLabel =
-  | "bot-review-needed"
-  | "bot-changes-needed"
-  | "bot-human-intervention";
-
 export type PassLabel =
-  | "agent-code-review-passed"
-  | "agent-qa-review-passed";
-
-export type BotLabel = StatusLabel | PassLabel;
+  | "code-review-passed"
+  | "qa-review-passed";
 
 export interface LocalReaction {
   content: "rocket" | "+1";
@@ -47,7 +40,6 @@ export interface LocalReview {
 export interface LocalPRState {
   version: 1;
   pr: PRInfo;
-  label: StatusLabel;
   passLabels: PassLabel[];
   checkoutPath: string;
   description?: string;

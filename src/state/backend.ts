@@ -28,9 +28,6 @@ export interface StateBackend {
   fetchResolvedThreadIds(pr: PRInfo, phase?: ReviewPhase): Promise<Set<string>>;
   fetchUnresolvedThreadCount(pr: PRInfo, phase?: ReviewPhase): Promise<number>;
 
-  // Labels
-  setLabel(pr: PRInfo, label: string): Promise<void>;
-
   // Agent context — how to tell the agent about existing threads
   formatThreadStateForAgent(pr: PRInfo, phase?: ReviewPhase): Promise<string>;
 }
