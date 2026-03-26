@@ -234,7 +234,9 @@ test("buildPrDescriptionPrompt requires a Visual evidence section for React and 
   assert.match(reactPrompt, /must be a concise human-readable PR title, not the branch or worktree name/i);
   assert.match(reactPrompt, /\*\*Visual evidence\*\*/);
   assert.match(reactPrompt, /Playwright/);
-  assert.match(reactPrompt, /artifact path, whether it is a screenshot or video, the exact screen\/state shown/i);
+  assert.match(reactPrompt, /exact staged `\.ironsha\/pr-media\/\.\.\.` path, whether it is a screenshot or video, the exact screen\/state shown/i);
+  assert.match(reactPrompt, /Do not reference repo-local `artifacts\/\.\.\.` paths/i);
+  assert.match(reactPrompt, /specific and falsifiable/i);
   assert.match(reactPrompt, /Not applicable/);
   assert.match(iosPrompt, /\*\*Visual evidence\*\*/);
   assert.match(iosPrompt, /XcodeBuildMCP/);
@@ -280,9 +282,11 @@ test("buildQaReviewPrompt requires visual evidence validation for UI changes", (
   assert.match(prompt, /Playwright-driven visual evidence/i);
   assert.match(prompt, /XcodeBuildMCP-driven visual evidence/i);
   assert.match(prompt, /actually show the implemented feature/i);
-  assert.match(prompt, /staged under `\.ironsha\/pr-media\/`/i);
+  assert.match(prompt, /exists under `\.ironsha\/pr-media\/`/i);
   assert.match(prompt, /CLI can publish it during the publish step/i);
   assert.match(prompt, /rather than repo-local `artifacts\/` paths/i);
+  assert.match(prompt, /Do not ask for `\.gitignore` changes/i);
+  assert.match(prompt, /unique and falsifiable/i);
   assert.match(prompt, /git diff origin\/main\.\.\.HEAD/);
 });
 

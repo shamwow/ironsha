@@ -672,7 +672,10 @@ export function buildPrDescriptionPrompt(platform: string | null): string {
     const tool = platform === "react" ? "Playwright" : "XcodeBuildMCP";
     visualRequirements.push(
       "- Inspect the diff and determine whether it includes a user-visible UI change",
-      `- If it does, include a **Visual evidence** section where each item states the artifact path, whether it is a screenshot or video, the exact screen/state shown, and that it was captured with ${tool}`,
+      `- If it does, include a **Visual evidence** section where each item states the exact staged \`.ironsha/pr-media/...\` path, whether it is a screenshot or video, the exact screen/state shown, and that it was captured with ${tool}`,
+      "- Do not reference repo-local `artifacts/...` paths in the PR description",
+      "- Make every visual-evidence caption specific and falsifiable; only describe state that the artifact actually proves",
+      "- If the test plan distinguishes baseline, fallback, preset, or other special-case flows, describe those checks using state that is actually unique to each flow",
       "- For interactive UI changes, require video evidence, not screenshots alone",
       "- If it does not, include **Visual evidence**: Not applicable",
     );
