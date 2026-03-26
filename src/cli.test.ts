@@ -4,10 +4,12 @@ import test from "node:test";
 process.env.GITHUB_TOKEN ??= "test-token";
 
 const {
+  buildCodeReviewPrompt,
   buildQaPlanReviewPrompt,
   buildQaReviewPrompt,
   buildImplementPrompt,
   buildPrDescriptionPrompt,
+  formatPreviousIterations,
   formatSubprocessFailure,
 } = await import("./cli.js");
 
@@ -113,11 +115,14 @@ test("buildQaPlanReviewPrompt requires product-level test setup and verification
 test("buildQaReviewPrompt requires visual evidence validation for UI changes", () => {
   const prompt = buildQaReviewPrompt(
     "QA base prompt",
+    "Cycle 1 review: REQUEST_CHANGES - Missing uploaded media URLs.",
     "No existing review threads.",
     "**Visual evidence**\n- artifacts/demo.mp4",
     "main",
   );
 
+  assert.match(prompt, /## Previous Iterations/);
+  assert.match(prompt, /Cycle 1 review: REQUEST_CHANGES - Missing uploaded media URLs\./);
   assert.match(prompt, /Visual evidence/i);
   assert.match(prompt, /video\/GIF/i);
   assert.match(prompt, /Playwright-driven visual evidence/i);
@@ -125,5 +130,46 @@ test("buildQaReviewPrompt requires visual evidence validation for UI changes", (
   assert.match(prompt, /actually show the implemented feature/i);
   assert.match(prompt, /uploaded correctly/i);
   assert.match(prompt, /render or open successfully from the PR instead of 404ing/i);
+  assert.match(prompt, /git diff origin\/main\.\.\.HEAD/);
+});
+
+test("formatPreviousIterations returns a compact summary for prior loop cycles", () => {
+  const formatted = formatPreviousIterations([
+    {
+      cycle: 1,
+      reviewSummary: "Missing uploaded GitHub media URLs.",
+      reviewEvent: "REQUEST_CHANGES",
+      reviewCommentBodies: [
+        "Use uploaded GitHub media URLs instead of repo-relative paths.",
+      ],
+      fixSummary: "Replaced relative paths with uploaded URLs.",
+      threadsAddressed: ["thread-1"],
+      ciPassed: true,
+      notableFailures: ["First screenshot link still rendered as a relative path."],
+    },
+  ]);
+
+  assert.match(formatted, /Cycle 1 review: REQUEST_CHANGES - Missing uploaded GitHub media URLs\./);
+  assert.match(formatted, /Cycle 1 findings: Use uploaded GitHub media URLs instead of repo-relative paths\./);
+  assert.match(formatted, /Cycle 1 fix: Replaced relative paths with uploaded URLs\./);
+  assert.match(formatted, /Cycle 1 threads addressed: thread-1/);
+  assert.match(formatted, /Cycle 1 CI: passed/);
+  assert.match(formatted, /Cycle 1 notable failures: First screenshot link still rendered as a relative path\./);
+});
+
+test("buildCodeReviewPrompt includes previous iteration context", () => {
+  const prompt = buildCodeReviewPrompt(
+    "base prompt",
+    "architecture prompt",
+    "detailed prompt",
+    "",
+    "Cycle 1 review: REQUEST_CHANGES - Clarify task wording.",
+    "### Thread thread-1 (UNRESOLVED)\n- Clarify the completed task wording.",
+    "main",
+  );
+
+  assert.match(prompt, /## Previous Iterations/);
+  assert.match(prompt, /Cycle 1 review: REQUEST_CHANGES - Clarify task wording\./);
+  assert.match(prompt, /## Current Thread State/);
   assert.match(prompt, /git diff origin\/main\.\.\.HEAD/);
 });

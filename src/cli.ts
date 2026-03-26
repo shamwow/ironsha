@@ -714,15 +714,63 @@ type ReviewLoopConfig = {
   reviewPhaseFlag: "code" | "qa";
   passLabel: PassLabel;
   approvalMessage: string;
-  reviewPrompt: (threadState: string) => string;
-  fixPrompt: (threadState: string) => string;
+  reviewPrompt: (threadState: string, previousIterations: string) => string;
+  fixPrompt: (threadState: string, previousIterations: string) => string;
 };
 
-function buildCodeReviewPrompt(
+type LoopIterationContext = {
+  cycle: number;
+  reviewSummary: string;
+  reviewEvent: "COMMENT" | "REQUEST_CHANGES" | "APPROVE" | "UNKNOWN";
+  reviewCommentBodies: string[];
+  fixSummary?: string;
+  threadsAddressed: string[];
+  ciPassed: boolean;
+  notableFailures: string[];
+};
+
+function trimSingleLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+export function formatPreviousIterations(history: LoopIterationContext[]): string {
+  if (history.length === 0) {
+    return "No previous iterations.";
+  }
+
+  return history.slice(-3).map((entry) => {
+    const lines = [
+      `Cycle ${entry.cycle} review: ${entry.reviewEvent} - ${trimSingleLine(entry.reviewSummary || "No review summary recorded.")}`,
+    ];
+
+    if (entry.reviewCommentBodies.length > 0) {
+      lines.push(`Cycle ${entry.cycle} findings: ${entry.reviewCommentBodies.map(trimSingleLine).join(" | ")}`);
+    }
+
+    if (entry.fixSummary) {
+      lines.push(`Cycle ${entry.cycle} fix: ${trimSingleLine(entry.fixSummary)}`);
+    }
+
+    if (entry.threadsAddressed.length > 0) {
+      lines.push(`Cycle ${entry.cycle} threads addressed: ${entry.threadsAddressed.join(", ")}`);
+    }
+
+    lines.push(`Cycle ${entry.cycle} CI: ${entry.ciPassed ? "passed" : "failed"}`);
+
+    if (entry.notableFailures.length > 0) {
+      lines.push(`Cycle ${entry.cycle} notable failures: ${entry.notableFailures.map(trimSingleLine).join(" | ")}`);
+    }
+
+    return lines.join("\n");
+  }).join("\n\n");
+}
+
+export function buildCodeReviewPrompt(
   basePrompt: string,
   archPrompt: string,
   detailedPrompt: string,
   guideContent: string,
+  previousIterations: string,
   threadState: string,
   baseBranch: string,
 ): string {
@@ -733,6 +781,8 @@ function buildCodeReviewPrompt(
     "\n---\n",
     detailedPrompt,
     guideContent ? `\n---\n${guideContent}` : "",
+    "\n---\n\n## Previous Iterations\n",
+    previousIterations,
     "\n---\n\n## Current Thread State\n",
     threadState || "(no threads yet)",
     `\n\n## Instructions\nReview the code. Read the diff with \`git diff origin/${baseBranch}...HEAD\`. Perform BOTH architecture and detailed review in a single pass. Output a single JSON block per the format above.`,
@@ -741,12 +791,15 @@ function buildCodeReviewPrompt(
 
 export function buildQaReviewPrompt(
   qaPrompt: string,
+  previousIterations: string,
   threadState: string,
   description: string,
   baseBranch: string,
 ): string {
   return [
     qaPrompt,
+    "\n---\n\n## Previous Iterations\n",
+    previousIterations,
     "\n---\n\n## Current PR Description\n",
     description || "(no description)",
     "\n---\n\n## Current Thread State\n",
@@ -756,14 +809,23 @@ export function buildQaReviewPrompt(
 }
 
 async function runReviewFixLoop(cwd: string, config: ReviewLoopConfig): Promise<void> {
+  const history: LoopIterationContext[] = [];
+
   for (let cycle = 1; ; cycle++) {
     log(config.logPhase, `--- Cycle ${cycle} ---`);
+    const previousIterations = formatPreviousIterations(history);
+    let reviewSummary = "";
+    let reviewEvent: LoopIterationContext["reviewEvent"] = "UNKNOWN";
+    let reviewCommentBodies: string[] = [];
+    let fixSummary: string | undefined;
+    let threadsAddressed: string[] = [];
+    const notableFailures: string[] = [];
 
     log(config.logPhase, "Running review...");
     const threadState = runStateCmd(cwd, ["threads", "--phase", config.reviewPhaseFlag]);
     const reviewOutput = await runAgenticMode(
       config.reviewLlm,
-      config.reviewPrompt(threadState),
+      config.reviewPrompt(threadState, previousIterations),
       cwd,
       `${config.reviewPhasePrefix}-${cycle}`,
     );
@@ -771,11 +833,23 @@ async function runReviewFixLoop(cwd: string, config: ReviewLoopConfig): Promise<
     const reviewJson = extractJsonBlock(reviewOutput);
     if (reviewJson) {
       try {
+        const parsedReview = JSON.parse(reviewJson) as {
+          summary?: string;
+          event?: "COMMENT" | "REQUEST_CHANGES" | "APPROVE";
+          comments?: Array<{ body?: string }>;
+        };
+        reviewSummary = parsedReview.summary ?? "";
+        reviewEvent = parsedReview.event ?? "UNKNOWN";
+        reviewCommentBodies = (parsedReview.comments ?? [])
+          .map((comment) => comment.body?.trim())
+          .filter((body): body is string => Boolean(body));
         runStateCmd(cwd, ["review", "post", "--phase", config.reviewPhaseFlag, "--json", reviewJson]);
       } catch (err) {
+        notableFailures.push(`Failed to parse or post review JSON: ${String(err)}`);
         log(config.logPhase, `Failed to post review: ${err}`);
       }
     } else {
+      notableFailures.push("Could not extract JSON from review output.");
       log(config.logPhase, "Warning: could not extract JSON from review output");
     }
 
@@ -792,7 +866,7 @@ async function runReviewFixLoop(cwd: string, config: ReviewLoopConfig): Promise<
     const fixThreadState = runStateCmd(cwd, ["threads", "--phase", config.reviewPhaseFlag]);
     const fixOutput = await runAgenticMode(
       config.reviewLlm,
-      config.fixPrompt(fixThreadState),
+      config.fixPrompt(fixThreadState, previousIterations),
       cwd,
       `${config.fixPhasePrefix}-${cycle}`,
     );
@@ -802,18 +876,25 @@ async function runReviewFixLoop(cwd: string, config: ReviewLoopConfig): Promise<
       try {
         const fixResult = JSON.parse(fixJson) as {
           threads_addressed?: Array<{ thread_id: string; explanation: string }>;
+          summary?: string;
         };
+        fixSummary = fixResult.summary?.trim();
+        threadsAddressed = (fixResult.threads_addressed ?? []).map((thread) => thread.thread_id);
         for (const thread of fixResult.threads_addressed ?? []) {
           try {
             runStateCmd(cwd, ["reply", thread.thread_id, "--body", thread.explanation]);
             runStateCmd(cwd, ["resolve", thread.thread_id]);
           } catch (err) {
+            notableFailures.push(`Failed to resolve thread ${thread.thread_id}: ${String(err)}`);
             log(config.logPhase, `Failed to resolve thread ${thread.thread_id}: ${err}`);
           }
         }
       } catch {
+        notableFailures.push("Could not parse fix output JSON.");
         log(config.logPhase, "Warning: could not parse fix output JSON");
       }
+    } else {
+      notableFailures.push("Could not extract JSON from fix output.");
     }
 
     try {
@@ -824,7 +905,25 @@ async function runReviewFixLoop(cwd: string, config: ReviewLoopConfig): Promise<
     }
 
     log(config.logPhase, "Re-running CI...");
-    await runPrCiPhase(config.reviewLlm, cwd, `${config.ciPhasePrefix}-${cycle}`, config.logPhase);
+    let ciPassed = true;
+    try {
+      await runPrCiPhase(config.reviewLlm, cwd, `${config.ciPhasePrefix}-${cycle}`, config.logPhase);
+    } catch (err) {
+      ciPassed = false;
+      notableFailures.push(`CI rerun failed: ${err instanceof Error ? err.message : String(err)}`);
+      throw err;
+    } finally {
+      history.push({
+        cycle,
+        reviewSummary,
+        reviewEvent,
+        reviewCommentBodies,
+        fixSummary,
+        threadsAddressed,
+        ciPassed,
+        notableFailures,
+      });
+    }
   }
 }
 
@@ -897,19 +996,22 @@ async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<
     reviewPhaseFlag: "code",
     passLabel: "agent-code-review-passed",
     approvalMessage: "Code review passed. Moving to QA review.",
-    reviewPrompt: (threadState) => buildCodeReviewPrompt(
+    reviewPrompt: (threadState, previousIterations) => buildCodeReviewPrompt(
       basePrompt,
       archPrompt,
       detailedPrompt,
       guideContent,
+      previousIterations,
       threadState,
       baseBranch,
     ),
-    fixPrompt: (threadState) => [
+    fixPrompt: (threadState, previousIterations) => [
       codeFixPrompt,
+      "\n---\n\n## Previous Iterations\n",
+      previousIterations,
       "\n---\n\n## Current Thread State\n",
       threadState,
-      "\n\n## Instructions\nAddress all UNRESOLVED threads. Make code changes, run build/tests, then output the JSON result.",
+      "\n\n## Instructions\nAddress all UNRESOLVED threads. Use the previous-iteration context to avoid repeating failed approaches unless the environment or inputs materially changed. Make code changes, run build/tests, then output the JSON result.",
     ].join("\n"),
   });
 
@@ -923,19 +1025,22 @@ async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<
     reviewPhaseFlag: "qa",
     passLabel: "agent-qa-review-passed",
     approvalMessage: "QA review passed. Moving to publish.",
-    reviewPrompt: (threadState) => buildQaReviewPrompt(
+    reviewPrompt: (threadState, previousIterations) => buildQaReviewPrompt(
       qaReviewPromptBase,
+      previousIterations,
       threadState,
       runStateCmd(cwd, ["description"]),
       baseBranch,
     ),
-    fixPrompt: (threadState) => [
+    fixPrompt: (threadState, previousIterations) => [
       qaFixPromptBase,
+      "\n---\n\n## Previous Iterations\n",
+      previousIterations,
       "\n---\n\n## Current PR Description\n",
       runStateCmd(cwd, ["description"]),
       "\n---\n\n## Current Thread State\n",
       threadState,
-      "\n\n## Instructions\nAddress all UNRESOLVED QA threads. Update the PR description and visual evidence artifacts if needed. Make code changes only where required, run build/tests, then output the JSON result.",
+      "\n\n## Instructions\nAddress all UNRESOLVED QA threads. Use the previous-iteration context to avoid repeating failed approaches unless the environment or inputs materially changed. Update the PR description and visual evidence artifacts if needed. Make code changes only where required, run build/tests, then output the JSON result.",
     ].join("\n"),
   });
 
