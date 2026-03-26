@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 process.env.GITHUB_TOKEN ??= "test-token";
@@ -11,6 +15,7 @@ const {
   buildPrDescriptionPrompt,
   formatPreviousIterations,
   formatSubprocessFailure,
+  parseArgs,
 } = await import("./cli.js");
 const { rewriteMediaReferencesForGithub } = await import("./local/cli.js");
 
@@ -65,6 +70,78 @@ test("formatSubprocessFailure surfaces repeated Claude max-turn exhaustion clear
 
   assert.match(message, /exceeded its turn budget/i);
   assert.match(message, /retried once/i);
+});
+
+test("parseArgs accepts --plan-file without a task and resolves it from cwd", () => {
+  const tempDir = mkdtempSync(join(tmpdir(), "ironsha-plan-file-"));
+  const planPath = join(tempDir, "existing-plan.md");
+  writeFileSync(planPath, "# Imported Plan\n");
+
+  const originalCwd = process.cwd();
+  process.chdir(tempDir);
+
+  try {
+    const opts = parseArgs([
+      "node",
+      "cli.js",
+      "--plan-file",
+      "existing-plan.md",
+    ]);
+
+    assert.equal(opts.task, "");
+    assert.equal(opts.planFile, realpathSync(planPath));
+    assert.equal(opts.skipPlan, false);
+    assert.equal(opts.skipPlanReview, false);
+    assert.equal(opts.skipPlanQaReview, false);
+  } finally {
+    process.chdir(originalCwd);
+  }
+});
+
+test("parseArgs prefers --plan-file over relying on --skip-plan worktree state", () => {
+  const tempDir = mkdtempSync(join(tmpdir(), "ironsha-plan-file-"));
+  const planPath = join(tempDir, "imported.md");
+  writeFileSync(planPath, "# Imported Plan\n");
+
+  const originalCwd = process.cwd();
+  process.chdir(tempDir);
+
+  try {
+    const opts = parseArgs([
+      "node",
+      "cli.js",
+      "--skip-plan",
+      "--plan-file",
+      "imported.md",
+    ]);
+
+    assert.equal(opts.planFile, realpathSync(planPath));
+    assert.equal(opts.skipPlan, true);
+  } finally {
+    process.chdir(originalCwd);
+  }
+});
+
+test("cli exits early with a clear error when --plan-file is missing", () => {
+  const tempDir = mkdtempSync(join(tmpdir(), "ironsha-plan-file-"));
+  const cliPath = join(import.meta.dirname, "cli.js");
+  const result = spawnSync(
+    process.execPath,
+    [
+      cliPath,
+      "--plan-file",
+      join(tempDir, "missing-plan.md"),
+    ],
+    {
+      cwd: tempDir,
+      encoding: "utf8",
+      stdio: "pipe",
+    },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--plan-file not found/i);
+  assert.doesNotMatch(result.stderr, /Creating git worktree/i);
 });
 
 test("buildImplementPrompt requires visual evidence handling for React UI diffs", () => {

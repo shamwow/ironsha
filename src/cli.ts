@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { spawn, execFileSync } from "node:child_process";
-import { createWriteStream, readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { accessSync, constants, createWriteStream, readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { runBuildAndTests } from "./review/build-runner.js";
 import {
@@ -22,6 +22,7 @@ interface LlmConfig {
 
 interface OrchestrateOptions {
   task: string;
+  planFile?: string;
   planLlm: LlmConfig;
   planReviewLlm: LlmConfig;
   planQaReviewLlm: LlmConfig;
@@ -55,6 +56,7 @@ Options:
   --implement-llm <provider:model>  LLM for implementation (default: claude:claude-opus-4-6)
   --code-review-llm <provider:model> LLM for code review (default: claude:claude-opus-4-6)
   --review-iterations <n>           Plan review cycles (default: 1)
+  --plan-file <path>                Import an existing plan file and skip plan, plan review, and QA plan review
   --skip-plan                       Skip planning phase
   --skip-plan-review                Skip plan review phase
   --skip-plan-qa-review             Skip QA plan review phase
@@ -101,7 +103,7 @@ function parseLlm(value: string): LlmConfig {
   return { provider: provider as "claude" | "codex", model };
 }
 
-function parseArgs(argv: string[]): OrchestrateOptions {
+export function parseArgs(argv: string[]): OrchestrateOptions {
   const args = argv.slice(2);
   const flags: Record<string, string> = {};
   const boolFlags = new Set<string>();
@@ -127,10 +129,24 @@ function parseArgs(argv: string[]): OrchestrateOptions {
   }
 
   const task = positional[0] ?? "";
+  const planFile = flags["plan-file"] ? resolve(flags["plan-file"]) : undefined;
   const skipPlan = boolFlags.has("skip-plan");
 
-  if (!task && !skipPlan) {
-    console.error("Error: task description is required (or use --skip-plan)\n");
+  if (planFile && !existsSync(planFile)) {
+    console.error(`Error: --plan-file not found: ${planFile}\n`);
+    process.exit(1);
+  }
+  if (planFile) {
+    try {
+      accessSync(planFile, constants.R_OK);
+    } catch {
+      console.error(`Error: --plan-file is not readable: ${planFile}\n`);
+      process.exit(1);
+    }
+  }
+
+  if (!task && !skipPlan && !planFile) {
+    console.error("Error: task description is required (or use --skip-plan or --plan-file)\n");
     console.log(USAGE);
     process.exit(1);
   }
@@ -139,6 +155,7 @@ function parseArgs(argv: string[]): OrchestrateOptions {
 
   return {
     task,
+    planFile,
     planLlm: flags["plan-llm"] ? parseLlm(flags["plan-llm"]) : (globalLlm ?? DEFAULT_LLM),
     planReviewLlm: flags["plan-review-llm"] ? parseLlm(flags["plan-review-llm"]) : (globalLlm ?? DEFAULT_LLM),
     planQaReviewLlm: flags["plan-qa-review-llm"] ? parseLlm(flags["plan-qa-review-llm"]) : (globalLlm ?? DEFAULT_LLM),
@@ -1079,6 +1096,11 @@ async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<
 export async function main(argv: string[] = process.argv): Promise<void> {
   const opts = parseArgs(argv);
   const repoRoot = process.cwd();
+  const importedPlan = opts.planFile ? readFileSync(opts.planFile, "utf-8") : undefined;
+  const useImportedPlan = Boolean(importedPlan);
+  const skipPlanPhase = useImportedPlan || opts.skipPlan;
+  const skipPlanReviewPhase = useImportedPlan || opts.skipPlanReview;
+  const skipPlanQaReviewPhase = useImportedPlan || opts.skipPlanQaReview;
   logDir = undefined;
   invocationCounter = 0;
 
@@ -1088,9 +1110,12 @@ export async function main(argv: string[] = process.argv): Promise<void> {
   log("SETUP", `Worktree created at ${worktreePath}`);
 
   log("SETUP", "Configuration:");
-  log("SETUP", `  Plan:      ${llmLabel(opts.planLlm)}${opts.skipPlan ? " (skipped)" : ""}`);
-  log("SETUP", `  Plan Review: ${llmLabel(opts.planReviewLlm)} x${opts.reviewIterations}${opts.skipPlanReview ? " (skipped)" : ""}`);
-  log("SETUP", `  Plan QA:     ${llmLabel(opts.planQaReviewLlm)}${opts.skipPlanQaReview ? " (skipped)" : ""}`);
+  if (opts.planFile) {
+    log("SETUP", `  Plan file: ${opts.planFile}`);
+  }
+  log("SETUP", `  Plan:      ${llmLabel(opts.planLlm)}${skipPlanPhase ? " (skipped)" : ""}`);
+  log("SETUP", `  Plan Review: ${llmLabel(opts.planReviewLlm)} x${opts.reviewIterations}${skipPlanReviewPhase ? " (skipped)" : ""}`);
+  log("SETUP", `  Plan QA:     ${llmLabel(opts.planQaReviewLlm)}${skipPlanQaReviewPhase ? " (skipped)" : ""}`);
   log("SETUP", `  Implement: ${llmLabel(opts.implementLlm)}${opts.skipImplement ? " (skipped)" : ""}`);
   log("SETUP", `  Code Review: ${llmLabel(opts.codeReviewLlm)}${opts.skipCodeReview ? " (skipped)" : ""}`);
   log("SETUP", `  Transcripts: ${ensureLogDir(worktreePath)}`);
@@ -1098,7 +1123,13 @@ export async function main(argv: string[] = process.argv): Promise<void> {
   try {
     // Phase 1: Plan
     let plan: string;
-    if (!opts.skipPlan) {
+    if (importedPlan) {
+      const importedPlanPath = planFilePath(worktreePath);
+      writeFileSync(importedPlanPath, importedPlan);
+      plan = importedPlan;
+      log("PLAN", `Skipped. Imported existing plan from ${opts.planFile}`);
+      log("PLAN", `Saved imported plan to .ironsha/plan.md`);
+    } else if (!opts.skipPlan) {
       plan = await runPlanPhase(opts, worktreePath);
     } else {
       const planPath = planFilePath(worktreePath);
@@ -1111,13 +1142,13 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     }
 
     // Phase 2: Review & Iterate
-    if (!opts.skipPlanReview) {
+    if (!skipPlanReviewPhase) {
       plan = await runReviewPhase(opts, plan, worktreePath);
     } else {
       log("REVIEW", "Skipped.");
     }
 
-    if (!opts.skipPlanQaReview) {
+    if (!skipPlanQaReviewPhase) {
       plan = await runQaPlanReviewPhase(opts, plan, worktreePath);
     } else {
       log("QA-PLAN", "Skipped.");
