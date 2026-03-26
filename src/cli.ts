@@ -23,16 +23,18 @@ interface LlmConfig {
 interface OrchestrateOptions {
   task: string;
   planLlm: LlmConfig;
-  reviewLlm: LlmConfig;
-  qaLlm: LlmConfig;
+  planReviewLlm: LlmConfig;
+  planQaReviewLlm: LlmConfig;
   implementLlm: LlmConfig;
-  prLlm: LlmConfig;
+  codeReviewLlm: LlmConfig;
   reviewIterations: number;
 
   skipPlan: boolean;
-  skipReview: boolean;
+  skipPlanReview: boolean;
+  skipPlanQaReview: boolean;
+  skipQaReview: boolean;
   skipImplement: boolean;
-  skipPr: boolean;
+  skipCodeReview: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -46,16 +48,19 @@ const MAX_TURNS = 50;
 const USAGE = `Usage: ironsha build "<task description>" [options]
 
 Options:
+  --global-llm <provider:model>     LLM for all phases unless overridden per phase
   --plan-llm <provider:model>       LLM for planning (default: claude:claude-opus-4-6)
-  --review-llm <provider:model>     LLM for plan review (default: claude:claude-opus-4-6)
-  --qa-llm <provider:model>         LLM for QA plan/pr review (default: claude:claude-opus-4-6)
+  --plan-review-llm <provider:model> LLM for plan review (default: claude:claude-opus-4-6)
+  --plan-qa-review-llm <provider:model> LLM for QA plan review and QA review (default: claude:claude-opus-4-6)
   --implement-llm <provider:model>  LLM for implementation (default: claude:claude-opus-4-6)
-  --pr-llm <provider:model>         LLM for PR review (default: claude:claude-opus-4-6)
+  --code-review-llm <provider:model> LLM for code review (default: claude:claude-opus-4-6)
   --review-iterations <n>           Plan review cycles (default: 1)
   --skip-plan                       Skip planning phase
-  --skip-review                     Skip plan review phase
+  --skip-plan-review                Skip plan review phase
+  --skip-plan-qa-review             Skip QA plan review phase
+  --skip-qa-review                  Skip QA review loop
   --skip-implement                  Skip implementation phase
-  --skip-pr                         Skip PR review phase
+  --skip-code-review                Skip code review and publish phase
 
 Provider:model examples:
   claude:claude-opus-4-6
@@ -108,9 +113,11 @@ function parseArgs(argv: string[]): OrchestrateOptions {
       process.exit(0);
     }
     if (args[i] === "--skip-plan") { boolFlags.add("skip-plan"); continue; }
-    if (args[i] === "--skip-review") { boolFlags.add("skip-review"); continue; }
+    if (args[i] === "--skip-plan-review") { boolFlags.add("skip-plan-review"); continue; }
+    if (args[i] === "--skip-plan-qa-review") { boolFlags.add("skip-plan-qa-review"); continue; }
+    if (args[i] === "--skip-qa-review") { boolFlags.add("skip-qa-review"); continue; }
     if (args[i] === "--skip-implement") { boolFlags.add("skip-implement"); continue; }
-    if (args[i] === "--skip-pr") { boolFlags.add("skip-pr"); continue; }
+    if (args[i] === "--skip-code-review") { boolFlags.add("skip-code-review"); continue; }
     if (args[i].startsWith("--") && i + 1 < args.length && !args[i + 1].startsWith("--")) {
       flags[args[i].slice(2)] = args[i + 1];
       i++;
@@ -128,18 +135,22 @@ function parseArgs(argv: string[]): OrchestrateOptions {
     process.exit(1);
   }
 
+  const globalLlm = flags["global-llm"] ? parseLlm(flags["global-llm"]) : undefined;
+
   return {
     task,
-    planLlm: flags["plan-llm"] ? parseLlm(flags["plan-llm"]) : DEFAULT_LLM,
-    reviewLlm: flags["review-llm"] ? parseLlm(flags["review-llm"]) : DEFAULT_LLM,
-    qaLlm: flags["qa-llm"] ? parseLlm(flags["qa-llm"]) : DEFAULT_LLM,
-    implementLlm: flags["implement-llm"] ? parseLlm(flags["implement-llm"]) : DEFAULT_LLM,
-    prLlm: flags["pr-llm"] ? parseLlm(flags["pr-llm"]) : DEFAULT_LLM,
+    planLlm: flags["plan-llm"] ? parseLlm(flags["plan-llm"]) : (globalLlm ?? DEFAULT_LLM),
+    planReviewLlm: flags["plan-review-llm"] ? parseLlm(flags["plan-review-llm"]) : (globalLlm ?? DEFAULT_LLM),
+    planQaReviewLlm: flags["plan-qa-review-llm"] ? parseLlm(flags["plan-qa-review-llm"]) : (globalLlm ?? DEFAULT_LLM),
+    implementLlm: flags["implement-llm"] ? parseLlm(flags["implement-llm"]) : (globalLlm ?? DEFAULT_LLM),
+    codeReviewLlm: flags["code-review-llm"] ? parseLlm(flags["code-review-llm"]) : (globalLlm ?? DEFAULT_LLM),
     reviewIterations: flags["review-iterations"] ? parseInt(flags["review-iterations"], 10) : 1,
     skipPlan,
-    skipReview: boolFlags.has("skip-review"),
+    skipPlanReview: boolFlags.has("skip-plan-review"),
+    skipPlanQaReview: boolFlags.has("skip-plan-qa-review"),
+    skipQaReview: boolFlags.has("skip-qa-review"),
     skipImplement: boolFlags.has("skip-implement"),
-    skipPr: boolFlags.has("skip-pr"),
+    skipCodeReview: boolFlags.has("skip-code-review"),
   };
 }
 
@@ -597,7 +608,7 @@ async function runReviewPhase(opts: OrchestrateOptions, plan: string, cwd: strin
   let currentPlan = plan;
 
   for (let i = 1; i <= opts.reviewIterations; i++) {
-    log("REVIEW", `Starting iteration ${i}/${opts.reviewIterations} with ${llmLabel(opts.reviewLlm)}...`);
+    log("REVIEW", `Starting iteration ${i}/${opts.reviewIterations} with ${llmLabel(opts.planReviewLlm)}...`);
 
     const prompt = `You are a senior engineer reviewing an implementation plan.
 
@@ -618,7 +629,7 @@ ${currentPlan}
 ## Output
 Respond with the complete updated Markdown plan. Nothing else.`;
 
-    currentPlan = await runPrintMode(opts.reviewLlm, prompt, cwd, `review-${i}`);
+    currentPlan = await runPrintMode(opts.planReviewLlm, prompt, cwd, `review-${i}`);
     const planPath = planFilePath(cwd);
     writeFileSync(planPath, currentPlan);
     log("REVIEW", `Iteration ${i}/${opts.reviewIterations} complete.`);
@@ -628,9 +639,9 @@ Respond with the complete updated Markdown plan. Nothing else.`;
 }
 
 async function runQaPlanReviewPhase(opts: OrchestrateOptions, plan: string, cwd: string): Promise<string> {
-  log("QA-PLAN", `Starting with ${llmLabel(opts.qaLlm)}...`);
+  log("QA-PLAN", `Starting with ${llmLabel(opts.planQaReviewLlm)}...`);
   const updatedPlan = await runPrintMode(
-    opts.qaLlm,
+    opts.planQaReviewLlm,
     buildQaPlanReviewPrompt(opts.task, plan),
     cwd,
     "qa-plan-review",
@@ -933,11 +944,11 @@ async function runReviewFixLoop(cwd: string, config: ReviewLoopConfig): Promise<
 }
 
 async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<void> {
-  log("PR-REVIEW", `Starting with ${llmLabel(opts.prLlm)}...`);
+  log("PR-REVIEW", `Starting with ${llmLabel(opts.codeReviewLlm)}...`);
 
   // --- Setup ---
   log("PR-REVIEW", "Running CI (build/tests)...");
-  await runPrCiPhase(opts.prLlm, cwd, "pr-ci");
+  await runPrCiPhase(opts.codeReviewLlm, cwd, "pr-ci");
 
   log("PR-REVIEW", "Initializing local state...");
   runStateCmd(cwd, ["init"]);
@@ -955,7 +966,7 @@ async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<
   const baseBranch = "main";
   const platform = detectPlatformFromDiff(cwd, baseBranch);
   const descOutput = await runPrintMode(
-    opts.prLlm,
+    opts.codeReviewLlm,
     buildPrDescriptionPrompt(platform),
     cwd,
     "pr-description",
@@ -994,7 +1005,7 @@ async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<
 
   await runReviewFixLoop(cwd, {
     logPhase: "PR-REVIEW",
-    reviewLlm: opts.prLlm,
+    reviewLlm: opts.codeReviewLlm,
     reviewPhasePrefix: "pr-review",
     fixPhasePrefix: "pr-fix",
     ciPhasePrefix: "pr-ci",
@@ -1020,34 +1031,38 @@ async function runPrReviewPhase(opts: OrchestrateOptions, cwd: string): Promise<
     ].join("\n"),
   });
 
-  log("QA-REVIEW", `Starting with ${llmLabel(opts.qaLlm)}...`);
-  await runReviewFixLoop(cwd, {
-    logPhase: "QA-REVIEW",
-    reviewLlm: opts.qaLlm,
-    reviewPhasePrefix: "qa-review",
-    fixPhasePrefix: "qa-fix",
-    ciPhasePrefix: "qa-ci",
-    reviewPhaseFlag: "qa",
-    passLabel: "agent-qa-review-passed",
-    approvalMessage: "QA review passed. Moving to publish.",
-    reviewPrompt: (threadState, previousIterations) => buildQaReviewPrompt(
-      qaReviewPromptBase,
-      previousIterations,
-      threadState,
-      runStateCmd(cwd, ["description"]),
-      baseBranch,
-    ),
-    fixPrompt: (threadState, previousIterations) => [
-      qaFixPromptBase,
-      "\n---\n\n## Previous Iterations\n",
-      previousIterations,
-      "\n---\n\n## Current PR Description\n",
-      runStateCmd(cwd, ["description"]),
-      "\n---\n\n## Current Thread State\n",
-      threadState,
-      "\n\n## Instructions\nAddress all UNRESOLVED QA threads. Use the previous-iteration context to avoid repeating failed approaches unless the environment or inputs materially changed. Update the PR description and visual evidence artifacts if needed. Make code changes only where required, run build/tests, then output the JSON result.",
-    ].join("\n"),
-  });
+  if (!opts.skipQaReview) {
+    log("QA-REVIEW", `Starting with ${llmLabel(opts.planQaReviewLlm)}...`);
+    await runReviewFixLoop(cwd, {
+      logPhase: "QA-REVIEW",
+      reviewLlm: opts.planQaReviewLlm,
+      reviewPhasePrefix: "qa-review",
+      fixPhasePrefix: "qa-fix",
+      ciPhasePrefix: "qa-ci",
+      reviewPhaseFlag: "qa",
+      passLabel: "agent-qa-review-passed",
+      approvalMessage: "QA review passed. Moving to publish.",
+      reviewPrompt: (threadState, previousIterations) => buildQaReviewPrompt(
+        qaReviewPromptBase,
+        previousIterations,
+        threadState,
+        runStateCmd(cwd, ["description"]),
+        baseBranch,
+      ),
+      fixPrompt: (threadState, previousIterations) => [
+        qaFixPromptBase,
+        "\n---\n\n## Previous Iterations\n",
+        previousIterations,
+        "\n---\n\n## Current PR Description\n",
+        runStateCmd(cwd, ["description"]),
+        "\n---\n\n## Current Thread State\n",
+        threadState,
+        "\n\n## Instructions\nAddress all UNRESOLVED QA threads. Use the previous-iteration context to avoid repeating failed approaches unless the environment or inputs materially changed. Update the PR description and visual evidence artifacts if needed. Make code changes only where required, run build/tests, then output the JSON result.",
+      ].join("\n"),
+    });
+  } else {
+    log("QA-REVIEW", "Skipped.");
+  }
 
   // Commit any outstanding changes before publish
   try {
@@ -1082,10 +1097,10 @@ export async function main(argv: string[] = process.argv): Promise<void> {
 
   log("SETUP", "Configuration:");
   log("SETUP", `  Plan:      ${llmLabel(opts.planLlm)}${opts.skipPlan ? " (skipped)" : ""}`);
-  log("SETUP", `  Review:    ${llmLabel(opts.reviewLlm)} x${opts.reviewIterations}${opts.skipReview ? " (skipped)" : ""}`);
-  log("SETUP", `  QA:        ${llmLabel(opts.qaLlm)}`);
+  log("SETUP", `  Plan Review: ${llmLabel(opts.planReviewLlm)} x${opts.reviewIterations}${opts.skipPlanReview ? " (skipped)" : ""}`);
+  log("SETUP", `  Plan QA:     ${llmLabel(opts.planQaReviewLlm)}${opts.skipPlanQaReview ? " (skipped)" : ""}`);
   log("SETUP", `  Implement: ${llmLabel(opts.implementLlm)}${opts.skipImplement ? " (skipped)" : ""}`);
-  log("SETUP", `  PR Review: ${llmLabel(opts.prLlm)}${opts.skipPr ? " (skipped)" : ""}`);
+  log("SETUP", `  Code Review: ${llmLabel(opts.codeReviewLlm)}${opts.skipCodeReview ? " (skipped)" : ""}`);
   log("SETUP", `  Transcripts: ${ensureLogDir(worktreePath)}`);
 
   try {
@@ -1104,13 +1119,13 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     }
 
     // Phase 2: Review & Iterate
-    if (!opts.skipReview) {
+    if (!opts.skipPlanReview) {
       plan = await runReviewPhase(opts, plan, worktreePath);
     } else {
       log("REVIEW", "Skipped.");
     }
 
-    if (!opts.skipReview) {
+    if (!opts.skipPlanQaReview) {
       plan = await runQaPlanReviewPhase(opts, plan, worktreePath);
     } else {
       log("QA-PLAN", "Skipped.");
@@ -1124,7 +1139,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     }
 
     // Phase 4: PR Review
-    if (!opts.skipPr) {
+    if (!opts.skipCodeReview) {
       await runPrReviewPhase(opts, worktreePath);
     } else {
       log("PR-REVIEW", "Skipped.");

@@ -448,10 +448,10 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
           cliPath,
           "Complete the task in src/task.txt and open a PR",
           "--plan-llm", "codex:gpt-5.4",
-          "--review-llm", "codex:gpt-5.4",
-          "--qa-llm", "codex:gpt-5.4",
+          "--plan-review-llm", "codex:gpt-5.4",
+          "--plan-qa-review-llm", "codex:gpt-5.4",
           "--implement-llm", "codex:gpt-5.4",
-          "--pr-llm", "codex:gpt-5.4",
+          "--code-review-llm", "codex:gpt-5.4",
         ],
         {
           cwd: fixture.repoPath,
