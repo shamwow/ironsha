@@ -48,3 +48,16 @@ After making all changes, output a single JSON block:
 - If a review comment is unclear or impossible to address, still include it in `threads_addressed` with an explanation of why you couldn't make the change
 - Do not add new features or improvements beyond what the review comments request
 - Do NOT run any `label` commands or change the PR label — only the review pipeline can set labels
+
+---
+
+## Previous Iterations
+{{PREVIOUS_ITERATIONS}}
+
+---
+
+## Current Thread State
+{{THREAD_STATE}}
+
+## Instructions
+Address all UNRESOLVED threads. Use the previous-iteration context to avoid repeating failed approaches unless the environment or inputs materially changed. Make code changes, run build/tests, then output the JSON result.

@@ -24,3 +24,21 @@ After making all changes, output a single JSON block:
   "summary": "1-2 sentence summary of the QA fixes"
 }
 ```
+
+---
+
+## Previous Iterations
+{{PREVIOUS_ITERATIONS}}
+
+---
+
+## Current PR Description
+{{DESCRIPTION}}
+
+---
+
+## Current Thread State
+{{THREAD_STATE}}
+
+## Instructions
+Address all UNRESOLVED QA threads. Use the previous-iteration context to avoid repeating failed approaches unless the environment or inputs materially changed. Update the PR description and visual evidence artifacts if needed. Make code changes only where required, run build/tests, then output the JSON result.

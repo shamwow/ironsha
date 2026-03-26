@@ -34,3 +34,21 @@ After your review, output a single JSON block:
 - If the evidence does not match the feature behavior, leave a blocking comment explaining the mismatch.
 - If there are any blocking comments, return `event: "REQUEST_CHANGES"`.
 - If everything is acceptable, return `event: "APPROVE"` with no comments.
+
+---
+
+## Previous Iterations
+{{PREVIOUS_ITERATIONS}}
+
+---
+
+## Current PR Description
+{{DESCRIPTION}}
+
+---
+
+## Current Thread State
+{{THREAD_STATE}}
+
+## Instructions
+Review the implemented feature from a QA perspective. Read the diff with `git diff origin/{{BASE_BRANCH}}...HEAD`. Verify the test plan exercises the feature at the product level. For React/web UI changes, require Playwright-driven visual evidence that shows how the app was loaded into the correct state. For iOS UI changes, require XcodeBuildMCP-driven visual evidence that shows how the simulator was loaded into the correct state. For UI changes, verify the PR description includes the right visual evidence, require video/GIF for interactive behavior, confirm the screenshot/video artifacts actually show the implemented feature working correctly, and validate that every referenced screenshot and video artifact is staged under `.ironsha/pr-media/` so the CLI can publish it during the publish step. For screenshots, require PR description links that point at those staged `.ironsha/pr-media/` paths rather than repo-local `artifacts/` paths. Output a single JSON block per the format above.

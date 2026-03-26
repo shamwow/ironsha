@@ -16,6 +16,7 @@ const {
   formatPreviousIterations,
   formatSubprocessFailure,
   parseArgs,
+  renderPromptTemplate,
 } = await import("./cli.js");
 const { rewriteMediaReferencesForGithub } = await import("./local/cli.js");
 
@@ -257,9 +258,15 @@ test("buildQaPlanReviewPrompt requires product-level test setup and verification
   assert.match(prompt, /XcodeBuildMCP/i);
 });
 
+test("renderPromptTemplate throws when a required variable is missing", () => {
+  assert.throws(
+    () => renderPromptTemplate("plan-plan.md", {}),
+    /Missing required template variables for plan-plan\.md: TASK/,
+  );
+});
+
 test("buildQaReviewPrompt requires visual evidence validation for UI changes", () => {
   const prompt = buildQaReviewPrompt(
-    "QA base prompt",
     "Cycle 1 review: REQUEST_CHANGES - Stage visual evidence under .ironsha/pr-media/ instead of repo-relative artifacts paths.",
     "No existing review threads.",
     "**Visual evidence**\n- artifacts/demo.mp4",

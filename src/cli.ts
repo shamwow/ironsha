@@ -459,6 +459,18 @@ function readPromptFile(name: string): string {
   return readFileSync(join(srcRoot, "src", "prompts", name), "utf-8");
 }
 
+export function renderPromptTemplate(name: string, replacements: Record<string, string>): string {
+  let content = readPromptFile(name);
+  for (const [key, value] of Object.entries(replacements)) {
+    content = content.replaceAll(`{{${key}}}`, value);
+  }
+  const missing = [...new Set([...content.matchAll(/{{([A-Z0-9_]+)}}/g)].map((match) => match[1]))];
+  if (missing.length > 0) {
+    throw new Error(`Missing required template variables for ${name}: ${missing.join(", ")}`);
+  }
+  return content;
+}
+
 function readGuide(platform: string): string {
   const srcRoot = resolve(import.meta.dirname, "..");
   const guidePath = join(srcRoot, "src", "guides", `${platform.toUpperCase()}_CODE_REVIEW.md`);
@@ -647,49 +659,27 @@ export function buildQaPlanReviewPrompt(task: string, plan: string): string {
 }
 
 export function buildImplementPrompt(plan: string, platform: string | null): string {
-  const instructions = [
-    "- Implement each step of the plan in order",
-    "- Follow existing codebase patterns and conventions",
-    "- Read AGENTS.md, CLAUDE.md, ARCHITECTURE.md if they exist",
-    "- After making changes, run the project's build and test commands to verify",
-    "- Fix any build/test failures before proceeding",
-    "- Do NOT commit changes — just make the code changes and ensure they build",
-    "- Be thorough — implement every step in the plan",
-    ...uiEvidenceInstructions(platform),
-  ];
-
-  return `You are a software engineer implementing a plan. Follow it step by step.
-
-## Implementation Plan
-${plan}
-
-## Instructions
-${instructions.join("\n")}`;
+  const uiInstructions = uiEvidenceInstructions(platform);
+  return renderPromptTemplate("implement-implement.md", {
+    PLAN: plan,
+    UI_EVIDENCE_INSTRUCTIONS: uiInstructions.length > 0 ? `\n${uiInstructions.join("\n")}` : "",
+  });
 }
 
 export function buildPrDescriptionPrompt(platform: string | null): string {
-  const lines = [
-    "Look at the git diff for this branch against the base branch.",
-    "Output a single JSON object with this shape:",
-    '{ "title": "short PR title", "body": "full PR description markdown" }',
-    'The `title` must be a concise human-readable PR title, not the branch or worktree name.',
-    'The `body` markdown must include:',
-    "- **Summary**: What changed and why (1-3 bullet points)",
-    "- **Test plan**: Explicit steps that verify the changes work correctly",
-  ];
-
+  const visualRequirements: string[] = [];
   if (platform === "react" || platform === "ios") {
     const tool = platform === "react" ? "Playwright" : "XcodeBuildMCP";
-    lines.push(
+    visualRequirements.push(
       "- Inspect the diff and determine whether it includes a user-visible UI change",
       `- If it does, include a **Visual evidence** section where each item states the artifact path, whether it is a screenshot or video, the exact screen/state shown, and that it was captured with ${tool}`,
       "- For interactive UI changes, require video evidence, not screenshots alone",
       "- If it does not, include **Visual evidence**: Not applicable",
     );
   }
-
-  lines.push("", "Output ONLY the JSON object, no other commentary.");
-  return lines.join("\n");
+  return renderPromptTemplate("code-review-pr-description.md", {
+    VISUAL_EVIDENCE_REQUIREMENTS: visualRequirements.length > 0 ? `\n${visualRequirements.join("\n")}` : "",
+  });
 }
 
 type PrDraft = {
@@ -743,21 +733,7 @@ function extractJsonBlock(output: string): string | null {
 async function runPlanPhase(opts: OrchestrateOptions, cwd: string): Promise<string> {
   log("PLAN", `Starting with ${llmLabel(opts.planLlm)}...`);
 
-  const prompt = `You are a software architect planning an implementation.
-
-## Task
-${opts.task}
-
-## Instructions
-- Analyze the codebase thoroughly — read ARCHITECTURE.md, AGENTS.md, CLAUDE.md if they exist
-- Identify all files that need to change
-- Produce a detailed, step-by-step implementation plan in Markdown
-- For each step, specify: which file to change, what to change, and why
-- Consider edge cases, testing strategy, and potential issues
-- The plan should be detailed enough that another AI can implement it without ambiguity
-
-## Output
-Respond with a complete Markdown implementation plan. Nothing else.`;
+  const prompt = renderPromptTemplate("plan-plan.md", { TASK: opts.task });
 
   const plan = await runPrintMode(opts.planLlm, prompt, cwd, "plan");
   const planPath = planFilePath(cwd);
@@ -776,24 +752,10 @@ async function runReviewPhase(opts: OrchestrateOptions, plan: string, cwd: strin
   for (let i = 1; i <= opts.reviewIterations; i++) {
     log("REVIEW", `Starting iteration ${i}/${opts.reviewIterations} with ${llmLabel(opts.planReviewLlm)}...`);
 
-    const prompt = `You are a senior engineer reviewing an implementation plan.
-
-## Original Task
-${opts.task}
-
-## Current Plan
-${currentPlan}
-
-## Instructions
-- Identify missing steps, incorrect assumptions, or gaps
-- Check for edge cases that aren't addressed
-- Verify the plan follows existing codebase patterns and conventions
-- Check that the testing strategy is adequate
-- Produce an UPDATED version of the entire plan incorporating your improvements
-- If the plan is already excellent, return it unchanged with a note that no changes were needed
-
-## Output
-Respond with the complete updated Markdown plan. Nothing else.`;
+    const prompt = renderPromptTemplate("plan-review.md", {
+      TASK: opts.task,
+      PLAN: currentPlan,
+    });
 
     currentPlan = await runPrintMode(opts.planReviewLlm, prompt, cwd, `review-${i}`);
     const planPath = planFilePath(cwd);
@@ -854,7 +816,7 @@ function runStateCmd(
 async function runPrCiPhase(
   llm: LlmConfig,
   cwd: string,
-  phase: string,
+  phase: string,  
   logPhase: string = "PR-REVIEW",
 ): Promise<void> {
   const buildResult = await runBuildAndTests(cwd);
@@ -866,17 +828,7 @@ async function runPrCiPhase(
   log(logPhase, "Local build/tests failed; invoking fixer...");
   await runAgenticMode(
     llm,
-    [
-      "The project's build/test commands have already been discovered and run locally.",
-      "Do NOT search AGENTS.md, CLAUDE.md, README.md, or scan the repository for commands.",
-      "Use the failing output below to fix the issues, then re-run the same build/test commands until they all pass.",
-      "Only output a concise summary of what you fixed and confirm the commands passed.",
-      "",
-      "## Failing build/test output",
-      "```",
-      buildResult.output,
-      "```",
-    ].join("\n"),
+    renderPromptTemplate("ci-fix.md", { BUILD_OUTPUT: buildResult.output }),
     cwd,
     phase,
   );
@@ -960,38 +912,29 @@ export function buildCodeReviewPrompt(
   threadState: string,
   baseBranch: string,
 ): string {
-  return [
-    basePrompt,
-    "\n---\n",
-    archPrompt,
-    "\n---\n",
-    detailedPrompt,
-    guideContent ? `\n---\n${guideContent}` : "",
-    "\n---\n\n## Previous Iterations\n",
-    previousIterations,
-    "\n---\n\n## Current Thread State\n",
-    threadState || "(no threads yet)",
-    `\n\n## Instructions\nReview the code. Read the diff with \`git diff origin/${baseBranch}...HEAD\`. Perform BOTH architecture and detailed review in a single pass. Output a single JSON block per the format above.`,
-  ].join("\n");
+  return renderPromptTemplate("code-review-review.md", {
+    BASE_PROMPT: basePrompt,
+    ARCH_PROMPT: archPrompt,
+    DETAILED_PROMPT: detailedPrompt,
+    GUIDE_SECTION: guideContent ? `\n---\n\n${guideContent}` : "",
+    PREVIOUS_ITERATIONS: previousIterations,
+    THREAD_STATE: threadState || "(no threads yet)",
+    BASE_BRANCH: baseBranch,
+  });
 }
 
 export function buildQaReviewPrompt(
-  qaPrompt: string,
   previousIterations: string,
   threadState: string,
   description: string,
   baseBranch: string,
 ): string {
-  return [
-    qaPrompt,
-    "\n---\n\n## Previous Iterations\n",
-    previousIterations,
-    "\n---\n\n## Current PR Description\n",
-    description || "(no description)",
-    "\n---\n\n## Current Thread State\n",
-    threadState || "(no threads yet)",
-    `\n\n## Instructions\nReview the implemented feature from a QA perspective. Read the diff with \`git diff origin/${baseBranch}...HEAD\`. Verify the test plan exercises the feature at the product level. For React/web UI changes, require Playwright-driven visual evidence that shows how the app was loaded into the correct state. For iOS UI changes, require XcodeBuildMCP-driven visual evidence that shows how the simulator was loaded into the correct state. For UI changes, verify the PR description includes the right visual evidence, require video/GIF for interactive behavior, confirm the screenshot/video artifacts actually show the implemented feature working correctly, and validate that every referenced screenshot and video artifact is staged under \`.ironsha/pr-media/\` so the CLI can publish it during the publish step. For screenshots, require PR description links that point at those staged \`.ironsha/pr-media/\` paths rather than repo-local \`artifacts/\` paths. Output a single JSON block per the format above.`,
-  ].join("\n");
+  return renderPromptTemplate("qa-review-review.md", {
+    PREVIOUS_ITERATIONS: previousIterations,
+    DESCRIPTION: description || "(no description)",
+    THREAD_STATE: threadState || "(no threads yet)",
+    BASE_BRANCH: baseBranch,
+  });
 }
 
 async function runReviewFixLoop(cwd: string, config: ReviewLoopConfig): Promise<void> {
@@ -1187,12 +1130,10 @@ async function runCodeReviewPhase(
 
   const baseBranch = "main";
   const platform = detectPlatformFromDiff(cwd, baseBranch);
-  const basePrompt = readPromptFile("base.md");
-  const archPrompt = readPromptFile("architecture-pass.md");
-  const detailedPrompt = readPromptFile("detailed-pass.md");
+  const basePrompt = readPromptFile("code-review-base.md");
+  const archPrompt = readPromptFile("code-review-architecture-pass.md");
+  const detailedPrompt = readPromptFile("code-review-detailed-pass.md");
   const guideContent = platform ? readGuide(platform) : "";
-  const codeFixPrompt = readPromptFile("code-fix.md");
-
   await runReviewFixLoop(cwd, {
     logPhase: "PR-REVIEW",
     reviewLlm: opts.codeReviewLlm,
@@ -1211,14 +1152,10 @@ async function runCodeReviewPhase(
       threadState,
       baseBranch,
     ),
-    fixPrompt: (threadState, previousIterations) => [
-      codeFixPrompt,
-      "\n---\n\n## Previous Iterations\n",
-      previousIterations,
-      "\n---\n\n## Current Thread State\n",
-      threadState,
-      "\n\n## Instructions\nAddress all UNRESOLVED threads. Use the previous-iteration context to avoid repeating failed approaches unless the environment or inputs materially changed. Make code changes, run build/tests, then output the JSON result.",
-    ].join("\n"),
+    fixPrompt: (threadState, previousIterations) => renderPromptTemplate("code-review-fix.md", {
+      PREVIOUS_ITERATIONS: previousIterations,
+      THREAD_STATE: threadState,
+    }),
   });
 }
 
@@ -1241,8 +1178,6 @@ async function runQaReviewPhase(
   }
 
   const baseBranch = "main";
-  const qaReviewPromptBase = readPromptFile("qa-review.md");
-  const qaFixPromptBase = readPromptFile("qa-fix.md");
   await runReviewFixLoop(cwd, {
     logPhase: "QA-REVIEW",
     reviewLlm: opts.planQaReviewLlm,
@@ -1253,22 +1188,16 @@ async function runQaReviewPhase(
     passLabel: "qa-review-passed",
     approvalMessage: "QA review passed. Moving to publish.",
     reviewPrompt: (threadState, previousIterations) => buildQaReviewPrompt(
-      qaReviewPromptBase,
       previousIterations,
       threadState,
       runStateCmd(cwd, ["description"]),
       baseBranch,
     ),
-    fixPrompt: (threadState, previousIterations) => [
-      qaFixPromptBase,
-      "\n---\n\n## Previous Iterations\n",
-      previousIterations,
-      "\n---\n\n## Current PR Description\n",
-      runStateCmd(cwd, ["description"]),
-      "\n---\n\n## Current Thread State\n",
-      threadState,
-      "\n\n## Instructions\nAddress all UNRESOLVED QA threads. Use the previous-iteration context to avoid repeating failed approaches unless the environment or inputs materially changed. Update the PR description and visual evidence artifacts if needed. Make code changes only where required, run build/tests, then output the JSON result.",
-    ].join("\n"),
+    fixPrompt: (threadState, previousIterations) => renderPromptTemplate("qa-review-fix.md", {
+      PREVIOUS_ITERATIONS: previousIterations,
+      DESCRIPTION: runStateCmd(cwd, ["description"]),
+      THREAD_STATE: threadState,
+    }),
   });
 }
 
