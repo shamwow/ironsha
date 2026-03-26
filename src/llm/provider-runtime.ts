@@ -179,7 +179,7 @@ async function buildCodexInvocation(
   ];
 
   if (options.mode !== "print") {
-    args.push("--full-auto");
+    args.push("--dangerously-bypass-approvals-and-sandbox");
   }
 
   args.push("-");

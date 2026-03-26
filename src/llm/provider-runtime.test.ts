@@ -81,7 +81,8 @@ test("buildProviderInvocation composes prompt file into codex review stdin", asy
     promptPath,
   });
 
-  assert.ok(invocation.args.includes("--full-auto"));
+  assert.ok(invocation.args.includes("--dangerously-bypass-approvals-and-sandbox"));
+  assert.ok(!invocation.args.includes("--full-auto"));
   const input = buildProviderInput(invocation, "User message");
   assert.match(input, /Review this repo carefully/);
   assert.match(input, /User message/);
