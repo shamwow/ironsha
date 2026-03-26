@@ -28,7 +28,7 @@ test("LocalStateBackend persists general comments as resolvable threads", async 
       { path: "src/task.txt", line: 1, body: "Inline finding." },
     ];
 
-    await backend.postReview(pr, comments, "Summary", "COMMENT", "qa");
+    await backend.postReview(pr, comments, "REQUEST_CHANGES", "qa");
 
     const state = backend.getState();
     assert.equal(state.reviews.length, 1);
@@ -59,14 +59,12 @@ test("LocalStateBackend filters unresolved threads by review phase", async () =>
     await backend.postReview(
       pr,
       [{ path: "src/code.txt", line: 1, body: "Code issue." }],
-      "Code summary",
       "REQUEST_CHANGES",
       "code",
     );
     await backend.postReview(
       pr,
       [{ path: null, line: null, body: "QA issue." }],
-      "QA summary",
       "REQUEST_CHANGES",
       "qa",
     );

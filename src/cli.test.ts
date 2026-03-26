@@ -118,14 +118,14 @@ test("buildQaPlanReviewPrompt requires product-level test setup and verification
 test("buildQaReviewPrompt requires visual evidence validation for UI changes", () => {
   const prompt = buildQaReviewPrompt(
     "QA base prompt",
-    "Cycle 1 review: REQUEST_CHANGES - Missing uploaded media URLs.",
+    "Cycle 1 review: REQUEST_CHANGES - Use uploaded GitHub media URLs instead of repo-relative paths.",
     "No existing review threads.",
     "**Visual evidence**\n- artifacts/demo.mp4",
     "main",
   );
 
   assert.match(prompt, /## Previous Iterations/);
-  assert.match(prompt, /Cycle 1 review: REQUEST_CHANGES - Missing uploaded media URLs\./);
+  assert.match(prompt, /Cycle 1 review: REQUEST_CHANGES - Use uploaded GitHub media URLs instead of repo-relative paths\./);
   assert.match(prompt, /Visual evidence/i);
   assert.match(prompt, /video\/GIF/i);
   assert.match(prompt, /Playwright-driven visual evidence/i);
@@ -144,7 +144,6 @@ test("formatPreviousIterations returns a compact summary for prior loop cycles",
   const formatted = formatPreviousIterations([
     {
       cycle: 1,
-      reviewSummary: "Missing uploaded GitHub media URLs.",
       reviewEvent: "REQUEST_CHANGES",
       reviewCommentBodies: [
         "Use uploaded GitHub media URLs instead of repo-relative paths.",
@@ -156,7 +155,7 @@ test("formatPreviousIterations returns a compact summary for prior loop cycles",
     },
   ]);
 
-  assert.match(formatted, /Cycle 1 review: REQUEST_CHANGES - Missing uploaded GitHub media URLs\./);
+  assert.match(formatted, /Cycle 1 review: REQUEST_CHANGES - Use uploaded GitHub media URLs instead of repo-relative paths\./);
   assert.match(formatted, /Cycle 1 findings: Use uploaded GitHub media URLs instead of repo-relative paths\./);
   assert.match(formatted, /Cycle 1 fix: Replaced relative paths with uploaded URLs\./);
   assert.match(formatted, /Cycle 1 threads addressed: thread-1/);
@@ -170,13 +169,13 @@ test("buildCodeReviewPrompt includes previous iteration context", () => {
     "architecture prompt",
     "detailed prompt",
     "",
-    "Cycle 1 review: REQUEST_CHANGES - Clarify task wording.",
+    "Cycle 1 review: REQUEST_CHANGES - Clarify the completed task wording before merge.",
     "### Thread thread-1 (UNRESOLVED)\n- Clarify the completed task wording.",
     "main",
   );
 
   assert.match(prompt, /## Previous Iterations/);
-  assert.match(prompt, /Cycle 1 review: REQUEST_CHANGES - Clarify task wording\./);
+  assert.match(prompt, /Cycle 1 review: REQUEST_CHANGES - Clarify the completed task wording before merge\./);
   assert.match(prompt, /## Current Thread State/);
   assert.match(prompt, /git diff origin\/main\.\.\.HEAD/);
 });

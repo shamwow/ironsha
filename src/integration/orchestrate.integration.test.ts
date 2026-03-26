@@ -80,17 +80,16 @@ function createMockClaudeScript(): string {
     "}",
     "",
     "function hasPreviousReviewContext(prompt) {",
-    '  return prompt.includes("## Previous Iterations") && prompt.includes("Cycle 1 review: REQUEST_CHANGES - Mock review requests follow-up changes.");',
+    '  return prompt.includes("## Previous Iterations") && prompt.includes("Cycle 1 review: REQUEST_CHANGES - Clarify the completed task wording before merge. | Add a follow-up note for reviewers. [fallback-thread]");',
     "}",
     "",
     "function buildReviewResponse(prompt) {",
     '  if (hasPreviousReviewContext(prompt)) {',
-    '    return ["```json", "{\\"comments\\":[],\\"summary\\":\\"Mock review approval after follow-up.\\",\\"event\\":\\"APPROVE\\"}", "```"].join("\\n");',
+    '    return ["```json", "{\\"comments\\":[],\\"event\\":\\"APPROVE\\"}", "```"].join("\\n");',
     "  }",
     "  return [",
     '    "```json",',
     '    JSON.stringify({',
-    '      summary: "Mock review requests follow-up changes.",',
     '      event: "REQUEST_CHANGES",',
     '      comments: [',
     '        { path: "src/task.txt", line: 1, body: "Clarify the completed task wording before merge." },',
@@ -122,9 +121,9 @@ function createMockClaudeScript(): string {
     "function buildQaReviewResponse(prompt) {",
     '  const hasToolingInstructions = prompt.includes("Playwright-driven visual evidence") && prompt.includes("XcodeBuildMCP-driven visual evidence");',
     '  if (!hasToolingInstructions) {',
-    '    return ["```json", JSON.stringify({ summary: "QA requires the platform-specific visual evidence policy.", event: "REQUEST_CHANGES", comments: [{ path: null, line: null, body: "QA prompt must require Playwright for web UI evidence and XcodeBuildMCP for iOS UI evidence." }] }), "```"].join("\\n");',
+    '    return ["```json", JSON.stringify({ event: "REQUEST_CHANGES", comments: [{ path: null, line: null, body: "QA prompt must require Playwright for web UI evidence and XcodeBuildMCP for iOS UI evidence." }] }), "```"].join("\\n");',
     "  }",
-    '  return ["```json", "{\\"comments\\":[],\\"summary\\":\\"Mock QA approval after validating the feature end to end.\\",\\"event\\":\\"APPROVE\\"}", "```"].join("\\n");',
+    '  return ["```json", "{\\"comments\\":[],\\"event\\":\\"APPROVE\\"}", "```"].join("\\n");',
     "}",
     "",
     "const PLAN = [",
@@ -235,17 +234,16 @@ function createMockCodexScript(): string {
     "}",
     "",
     "function hasPreviousReviewContext(prompt) {",
-    '  return prompt.includes("## Previous Iterations") && prompt.includes("Cycle 1 review: REQUEST_CHANGES - Mock review requests follow-up changes.");',
+    '  return prompt.includes("## Previous Iterations") && prompt.includes("Cycle 1 review: REQUEST_CHANGES - Clarify the completed task wording before merge. | Add a follow-up note for reviewers. [fallback-thread]");',
     "}",
     "",
     "function buildReviewResponse(prompt) {",
     '  if (hasPreviousReviewContext(prompt)) {',
-    '    return ["```json", "{\\"comments\\":[],\\"summary\\":\\"Mock review approval after follow-up.\\",\\"event\\":\\"APPROVE\\"}", "```"].join("\\n");',
+    '    return ["```json", "{\\"comments\\":[],\\"event\\":\\"APPROVE\\"}", "```"].join("\\n");',
     "  }",
     "  return [",
     '    "```json",',
     '    JSON.stringify({',
-    '      summary: "Mock review requests follow-up changes.",',
     '      event: "REQUEST_CHANGES",',
     '      comments: [',
     '        { path: "src/task.txt", line: 1, body: "Clarify the completed task wording before merge." },',
@@ -277,9 +275,9 @@ function createMockCodexScript(): string {
     "function buildQaReviewResponse(prompt) {",
     '  const hasToolingInstructions = prompt.includes("Playwright-driven visual evidence") && prompt.includes("XcodeBuildMCP-driven visual evidence");',
     '  if (!hasToolingInstructions) {',
-    '    return ["```json", JSON.stringify({ summary: "QA requires the platform-specific visual evidence policy.", event: "REQUEST_CHANGES", comments: [{ path: null, line: null, body: "QA prompt must require Playwright for web UI evidence and XcodeBuildMCP for iOS UI evidence." }] }), "```"].join("\\n");',
+    '    return ["```json", JSON.stringify({ event: "REQUEST_CHANGES", comments: [{ path: null, line: null, body: "QA prompt must require Playwright for web UI evidence and XcodeBuildMCP for iOS UI evidence." }] }), "```"].join("\\n");',
     "  }",
-    '  return ["```json", "{\\"comments\\":[],\\"summary\\":\\"Mock QA approval after validating the feature end to end.\\",\\"event\\":\\"APPROVE\\"}", "```"].join("\\n");',
+    '  return ["```json", "{\\"comments\\":[],\\"event\\":\\"APPROVE\\"}", "```"].join("\\n");',
     "}",
     "",
     "const PLAN = [",
@@ -577,8 +575,8 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
       );
 
       assert.ok(
-        prData.reviews.some((review) => /Mock review requests follow-up changes/.test(review.body ?? "")),
-        "Expected a reviewer summary comment requesting changes",
+        !prData.reviews.some((review) => /Mock review requests follow-up changes|Mock review approval after follow-up|Mock QA approval after validating the feature end to end/.test(review.body ?? "")),
+        "Did not expect summary-only reviewer or QA reviews to be published",
       );
       assert.ok(
         reviewComments.some((comment) =>
@@ -602,10 +600,6 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
         "Expected an author fallback comment response on the PR",
       );
 
-      const followUpApprovalReview = reviews.find((review) =>
-        /Mock review approval after follow-up/.test(review.body ?? ""),
-      );
-      assert.ok(followUpApprovalReview?.submitted_at, "Expected a follow-up review summary with a timestamp");
       const finalApprovalReview = reviews.find((review) =>
         review.state === "APPROVED" &&
         /Automated code review and QA review passed/.test(review.body ?? ""),
@@ -617,25 +611,20 @@ describe("orchestrate integration", { timeout: 120_000 }, () => {
 
       const inlineReplyTime = Date.parse(inlineReply.created_at!);
       const fallbackReplyTime = Date.parse(fallbackReply.created_at!);
-      const followUpApprovalTime = Date.parse(followUpApprovalReview.submitted_at!);
       const finalApprovalTime = Date.parse(finalApprovalReview.submitted_at!);
 
       assert.ok(
         Number.isFinite(inlineReplyTime) && Number.isFinite(fallbackReplyTime) &&
-          Number.isFinite(followUpApprovalTime) && Number.isFinite(finalApprovalTime),
+          Number.isFinite(finalApprovalTime),
         "Expected valid timestamps for reply and approval events",
       );
       assert.ok(
-        inlineReplyTime <= followUpApprovalTime,
-        "Expected inline author replies to be posted before the follow-up approval summary review",
+        inlineReplyTime <= finalApprovalTime,
+        "Expected inline author replies to be posted before the final approval review",
       );
       assert.ok(
-        fallbackReplyTime <= followUpApprovalTime,
-        "Expected fallback author replies to be posted before the follow-up approval summary review",
-      );
-      assert.ok(
-        followUpApprovalTime <= finalApprovalTime,
-        "Expected the final APPROVED review to be posted after the follow-up approval summary review",
+        fallbackReplyTime <= finalApprovalTime,
+        "Expected fallback author replies to be posted before the final approval review",
       );
 
       const resolvedComment = reviewComments.find((comment) =>

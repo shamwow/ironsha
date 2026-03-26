@@ -239,7 +239,7 @@ Commands:
       List all reviews with their inline comments
 
   review post --phase <code|qa> --json <json>
-      Post a review from JSON: { comments: [{path,line,body}], summary, event }
+      Post a review from JSON: { comments: [{path,line,body}], event }
 
   resolve <comment-id>
       Mark a comment as resolved (add rocket + thumbs-up reactions)
@@ -388,28 +388,31 @@ async function publishToGitHub(
   console.log("Creating/finding PR...");
   let prUrl: string;
   let prNumber: number;
+  let existingPrState = "";
   try {
     const existing = runGh(
-      ["pr", "view", "--json", "number,url", "--jq", ".number"],
+      ["pr", "view", "--json", "number,url,state"],
       devEnv,
       { encoding: "utf-8" },
     ).trim();
-    prNumber = parseInt(existing, 10);
-    prUrl = runGh(
-      ["pr", "view", "--json", "url", "--jq", ".url"],
-      devEnv,
-      { encoding: "utf-8" },
-    ).trim();
-    console.log(`Found existing PR #${prNumber}: ${prUrl}`);
+    const parsed = JSON.parse(existing) as { number: number; url: string; state: string };
+    prNumber = parsed.number;
+    prUrl = parsed.url;
+    existingPrState = parsed.state;
+    if (existingPrState === "OPEN") {
+      console.log(`Found existing open PR #${prNumber}: ${prUrl}`);
 
-    // Update description if set
-    if (state.description || state.pr.title) {
-      const githubDescription = rewriteMediaReferencesForGithub(state.description || "", pr);
-      const title = state.pr.title || pr.branch;
-      execFileSync(
-        "gh", ["pr", "edit", String(prNumber), "--title", title, "--body", githubDescription],
-        { cwd: checkoutPath, stdio: "pipe", ...devEnv },
-      );
+      // Update description if set
+      if (state.description || state.pr.title) {
+        const githubDescription = rewriteMediaReferencesForGithub(state.description || "", pr);
+        const title = state.pr.title || pr.branch;
+        execFileSync(
+          "gh", ["pr", "edit", String(prNumber), "--title", title, "--body", githubDescription],
+          { cwd: checkoutPath, stdio: "pipe", ...devEnv },
+        );
+      }
+    } else {
+      throw new Error(`Existing PR is ${existingPrState}`);
     }
   } catch {
     // No existing PR — create one
@@ -424,7 +427,11 @@ async function publishToGitHub(
     // Extract PR number from URL
     const numMatch = prUrl.match(/\/pull\/(\d+)/);
     prNumber = numMatch ? parseInt(numMatch[1], 10) : 0;
-    console.log(`Created PR #${prNumber}: ${prUrl}`);
+    if (existingPrState && existingPrState !== "OPEN") {
+      console.log(`Created new PR #${prNumber}: ${prUrl} (existing branch PR was ${existingPrState.toLowerCase()})`);
+    } else {
+      console.log(`Created PR #${prNumber}: ${prUrl}`);
+    }
   }
 
   // 3. Fetch PR diff for comment validation
@@ -497,36 +504,6 @@ async function publishToGitHub(
     const inlineComments = validatedComments.filter((c) => c.path !== null && c.line !== null);
     const generalComments = validatedComments.filter((c) => c.path === null || c.line === null);
 
-    if (review.body) {
-      const payload = JSON.stringify({
-        body: review.body + makeFooter(review.id, review.id, footerRole),
-        event: review.event,
-        comments: [],
-      });
-      try {
-        runGh(
-          ["api", `${repoPath}/pulls/${prNumber}/reviews`, "--input", "-"],
-          botEnv,
-          { input: payload },
-        );
-      } catch {
-        const fallbackPayload = JSON.stringify({
-          body: review.body + makeFooter(review.id, review.id, footerRole),
-          event: "COMMENT",
-          comments: [],
-        });
-        try {
-          runGh(
-            ["api", `${repoPath}/pulls/${prNumber}/reviews`, "--input", "-"],
-            botEnv,
-            { input: fallbackPayload },
-          );
-        } catch {
-          console.error(`  Failed to post review ${review.id.slice(0, 8)}, continuing...`);
-        }
-      }
-    }
-
     for (const c of inlineComments) {
       try {
         if (!headSha) {
@@ -557,16 +534,11 @@ async function publishToGitHub(
     }
 
     for (const gc of generalComments) {
-      const gcPayload = JSON.stringify({
-        body: gc.body,
-        event: "COMMENT",
-        comments: [],
-      });
       try {
         runGh(
-          ["api", `${repoPath}/pulls/${prNumber}/reviews`, "--input", "-"],
+          ["api", `${repoPath}/issues/${prNumber}/comments`, "--input", "-"],
           botEnv,
-          { input: gcPayload },
+          { input: JSON.stringify({ body: gc.body }) },
         );
       } catch { /* skip */ }
     }
@@ -807,9 +779,6 @@ export async function main(argv: string[] = process.argv): Promise<void> {
         for (const review of state.reviews) {
           console.log(`\n## Review ${review.id.slice(0, 8)} (${review.event})`);
           console.log(`   ${review.createdAt}`);
-          if (review.body) {
-            console.log(`   Summary: ${review.body.slice(0, 100)}...`);
-          }
           for (const comment of review.comments) {
             const resolved = comment.reactions.some((r) => r.content === "rocket") &&
               comment.reactions.some((r) => r.content === "+1");
@@ -837,13 +806,12 @@ export async function main(argv: string[] = process.argv): Promise<void> {
         }
         let data: {
           comments: Array<{ path: string | null; line: number | null; body: string }>;
-          summary: string;
-          event?: "COMMENT" | "REQUEST_CHANGES" | "APPROVE";
+          event?: "REQUEST_CHANGES" | "APPROVE";
         };
         try {
           data = JSON.parse(jsonStr);
         } catch {
-          console.error("Invalid JSON. Expected: { comments: [{path,line,body}], summary, event }");
+          console.error("Invalid JSON. Expected: { comments: [{path,line,body}], event }");
           process.exit(1);
         }
         const comments = (data.comments ?? []).map((c) => ({
@@ -852,32 +820,36 @@ export async function main(argv: string[] = process.argv): Promise<void> {
           body: c.body,
         }));
 
-        // Determine event: if explicit, use it; otherwise infer from comments + unresolved state
         let event = data.event;
         let unresolvedCount: number | undefined;
         if (!event) {
-          if (comments.length > 0) {
-            event = "REQUEST_CHANGES";
-          } else {
-            unresolvedCount = await backend.fetchUnresolvedThreadCount(pr, phase);
-            event = unresolvedCount > 0 ? "COMMENT" : "APPROVE";
-          }
+          event = comments.length > 0 ? "REQUEST_CHANGES" : "APPROVE";
+        }
+        if (event !== "APPROVE" && event !== "REQUEST_CHANGES") {
+          console.error("Invalid event. Expected APPROVE or REQUEST_CHANGES.");
+          process.exit(1);
+        }
+        if (event === "REQUEST_CHANGES" && comments.length === 0) {
+          console.error("REQUEST_CHANGES reviews must include at least one comment.");
+          process.exit(1);
+        }
+        if (event === "APPROVE" && comments.length > 0) {
+          console.error("APPROVE reviews cannot include comments.");
+          process.exit(1);
         }
         const passLabel = passLabelForPhase(phase);
-        const persistedEvent = event === "APPROVE" ? "COMMENT" : event;
-        await backend.postReview(pr, comments, data.summary ?? "", persistedEvent, phase);
+        await backend.postReview(pr, comments, event, phase);
 
-        // Set label based on outcome (reuse cached unresolved count)
-        if (comments.length > 0) {
+        if (event === "REQUEST_CHANGES") {
           await backend.removePassLabel(pr, passLabel);
           await backend.setLabel(pr, "bot-changes-needed");
           console.log(`Posted review with ${comments.length} comment(s). Label: bot-changes-needed`);
         } else {
           unresolvedCount ??= await backend.fetchUnresolvedThreadCount(pr, phase);
-          if (event !== "APPROVE" || unresolvedCount > 0) {
+          if (unresolvedCount > 0) {
             await backend.removePassLabel(pr, passLabel);
             await backend.setLabel(pr, "bot-changes-needed");
-            console.log(`Posted clean review but ${unresolvedCount} unresolved thread(s) remain. Label: bot-changes-needed`);
+            console.log(`Cannot approve with ${unresolvedCount} unresolved thread(s). Label: bot-changes-needed`);
           } else {
             await backend.addPassLabel(pr, passLabel);
             await backend.setLabel(pr, "bot-review-needed");

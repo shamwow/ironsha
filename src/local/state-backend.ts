@@ -96,8 +96,7 @@ export class LocalStateBackend implements StateBackend {
   async postReview(
     pr: PRInfo,
     comments: ReviewComment[],
-    summary: string,
-    event: "COMMENT" | "REQUEST_CHANGES" | "APPROVE",
+    event: "REQUEST_CHANGES" | "APPROVE",
     phase: ReviewPhase = "code",
   ): Promise<void> {
     const now = new Date().toISOString();
@@ -116,7 +115,6 @@ export class LocalStateBackend implements StateBackend {
     const review: LocalReview = {
       id: randomUUID(),
       phase,
-      body: summary,
       event,
       author: BOT_LOGIN,
       comments: persistedComments,

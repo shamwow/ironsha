@@ -15,8 +15,7 @@ export interface StateBackend {
   postReview(
     pr: PRInfo,
     comments: ReviewComment[],
-    summary: string,
-    event: "COMMENT" | "REQUEST_CHANGES" | "APPROVE",
+    event: "REQUEST_CHANGES" | "APPROVE",
     phase?: ReviewPhase,
   ): Promise<void>;
   replyToThread(pr: PRInfo, threadId: string, body: string): Promise<void>;

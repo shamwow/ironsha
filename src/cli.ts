@@ -375,6 +375,10 @@ function readCommandFile(name: string): string {
   return readFileSync(join(srcRoot, "commands", name), "utf-8");
 }
 
+function planFilePath(cwd: string): string {
+  return join(cwd, ".ironsha", "plan.md");
+}
+
 function detectPlatformFromDiff(cwd: string, baseBranch: string): string | null {
   let diffOutput: string;
   try {
@@ -579,9 +583,9 @@ ${opts.task}
 Respond with a complete Markdown implementation plan. Nothing else.`;
 
   const plan = await runPrintMode(opts.planLlm, prompt, cwd, "plan");
-  const planPath = join(cwd, ".plan.md");
+  const planPath = planFilePath(cwd);
   writeFileSync(planPath, plan);
-  log("PLAN", `Complete. Saved to .plan.md`);
+  log("PLAN", `Complete. Saved to .ironsha/plan.md`);
   return plan;
 }
 
@@ -615,7 +619,7 @@ ${currentPlan}
 Respond with the complete updated Markdown plan. Nothing else.`;
 
     currentPlan = await runPrintMode(opts.reviewLlm, prompt, cwd, `review-${i}`);
-    const planPath = join(cwd, ".plan.md");
+    const planPath = planFilePath(cwd);
     writeFileSync(planPath, currentPlan);
     log("REVIEW", `Iteration ${i}/${opts.reviewIterations} complete.`);
   }
@@ -631,7 +635,7 @@ async function runQaPlanReviewPhase(opts: OrchestrateOptions, plan: string, cwd:
     cwd,
     "qa-plan-review",
   );
-  const planPath = join(cwd, ".plan.md");
+  const planPath = planFilePath(cwd);
   writeFileSync(planPath, updatedPlan);
   log("QA-PLAN", "Complete.");
   return updatedPlan;
@@ -723,8 +727,7 @@ type ReviewLoopConfig = {
 
 type LoopIterationContext = {
   cycle: number;
-  reviewSummary: string;
-  reviewEvent: "COMMENT" | "REQUEST_CHANGES" | "APPROVE" | "UNKNOWN";
+  reviewEvent: "REQUEST_CHANGES" | "APPROVE" | "UNKNOWN";
   reviewCommentBodies: string[];
   fixSummary?: string;
   threadsAddressed: string[];
@@ -742,8 +745,11 @@ export function formatPreviousIterations(history: LoopIterationContext[]): strin
   }
 
   return history.slice(-3).map((entry) => {
+    const reviewDetail = entry.reviewCommentBodies.length > 0
+      ? entry.reviewCommentBodies.map(trimSingleLine).join(" | ")
+      : "No blocking comments.";
     const lines = [
-      `Cycle ${entry.cycle} review: ${entry.reviewEvent} - ${trimSingleLine(entry.reviewSummary || "No review summary recorded.")}`,
+      `Cycle ${entry.cycle} review: ${entry.reviewEvent} - ${reviewDetail}`,
     ];
 
     if (entry.reviewCommentBodies.length > 0) {
@@ -817,7 +823,6 @@ async function runReviewFixLoop(cwd: string, config: ReviewLoopConfig): Promise<
   for (let cycle = 1; ; cycle++) {
     log(config.logPhase, `--- Cycle ${cycle} ---`);
     const previousIterations = formatPreviousIterations(history);
-    let reviewSummary = "";
     let reviewEvent: LoopIterationContext["reviewEvent"] = "UNKNOWN";
     let reviewCommentBodies: string[] = [];
     let fixSummary: string | undefined;
@@ -837,11 +842,9 @@ async function runReviewFixLoop(cwd: string, config: ReviewLoopConfig): Promise<
     if (reviewJson) {
       try {
         const parsedReview = JSON.parse(reviewJson) as {
-          summary?: string;
-          event?: "COMMENT" | "REQUEST_CHANGES" | "APPROVE";
+          event?: "REQUEST_CHANGES" | "APPROVE";
           comments?: Array<{ body?: string }>;
         };
-        reviewSummary = parsedReview.summary ?? "";
         reviewEvent = parsedReview.event ?? "UNKNOWN";
         reviewCommentBodies = (parsedReview.comments ?? [])
           .map((comment) => comment.body?.trim())
@@ -918,7 +921,6 @@ async function runReviewFixLoop(cwd: string, config: ReviewLoopConfig): Promise<
     } finally {
       history.push({
         cycle,
-        reviewSummary,
         reviewEvent,
         reviewCommentBodies,
         fixSummary,
@@ -1092,13 +1094,13 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     if (!opts.skipPlan) {
       plan = await runPlanPhase(opts, worktreePath);
     } else {
-      const planPath = join(worktreePath, ".plan.md");
+      const planPath = planFilePath(worktreePath);
       if (!existsSync(planPath)) {
-        console.error(`Error: --skip-plan specified but no .plan.md found at ${planPath}`);
+        console.error(`Error: --skip-plan specified but no .ironsha/plan.md found at ${planPath}`);
         process.exit(1);
       }
       plan = readFileSync(planPath, "utf-8");
-      log("PLAN", `Skipped. Loaded existing plan from .plan.md`);
+      log("PLAN", `Skipped. Loaded existing plan from .ironsha/plan.md`);
     }
 
     // Phase 2: Review & Iterate
