@@ -207,25 +207,22 @@ test("buildQaPlanReviewPrompt requires product-level test setup and verification
 test("buildQaReviewPrompt requires visual evidence validation for UI changes", () => {
   const prompt = buildQaReviewPrompt(
     "QA base prompt",
-    "Cycle 1 review: REQUEST_CHANGES - Use uploaded GitHub media URLs instead of repo-relative paths.",
+    "Cycle 1 review: REQUEST_CHANGES - Stage visual evidence under .ironsha/pr-media/ instead of repo-relative artifacts paths.",
     "No existing review threads.",
     "**Visual evidence**\n- artifacts/demo.mp4",
     "main",
   );
 
   assert.match(prompt, /## Previous Iterations/);
-  assert.match(prompt, /Cycle 1 review: REQUEST_CHANGES - Use uploaded GitHub media URLs instead of repo-relative paths\./);
+  assert.match(prompt, /Cycle 1 review: REQUEST_CHANGES - Stage visual evidence under .ironsha\/pr-media\/ instead of repo-relative artifacts paths\./);
   assert.match(prompt, /Visual evidence/i);
   assert.match(prompt, /video\/GIF/i);
   assert.match(prompt, /Playwright-driven visual evidence/i);
   assert.match(prompt, /XcodeBuildMCP-driven visual evidence/i);
   assert.match(prompt, /actually show the implemented feature/i);
-  assert.match(prompt, /GitHub-hosted/i);
-  assert.match(prompt, /load successfully from the PR or branch/i);
-  assert.match(prompt, /use the `pr-media` branch for all media/i);
-  assert.match(prompt, /stage media under `\.ironsha\/pr-media\/`/i);
-  assert.match(prompt, /publish them under `pr-media\/<worktree-name>\/`/i);
-  assert.match(prompt, /render inline for screenshots where GitHub supports it instead of 404ing/i);
+  assert.match(prompt, /staged under `\.ironsha\/pr-media\/`/i);
+  assert.match(prompt, /CLI can publish it during the publish step/i);
+  assert.match(prompt, /rather than repo-local `artifacts\/` paths/i);
   assert.match(prompt, /git diff origin\/main\.\.\.HEAD/);
 });
 
