@@ -9,6 +9,7 @@ import { validateComments } from "../github/comment-validator.js";
 import { config } from "../config.js";
 import type { PRInfo } from "../review/types.js";
 import type { BotLabel, PassLabel } from "./types.js";
+import type { ReviewPhase } from "../state/backend.js";
 
 const VALID_LABELS: readonly string[] = [
   "bot-review-needed", "bot-changes-needed",
@@ -31,6 +32,12 @@ const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "webm", "m4v"]);
 
 function passLabelForPhase(phase: string | undefined): PassLabel {
   return phase === "qa" ? "agent-qa-review-passed" : "agent-code-review-passed";
+}
+
+function parseReviewPhase(value: string | undefined): ReviewPhase | undefined {
+  if (!value) return undefined;
+  if (value === "code" || value === "qa") return value;
+  return undefined;
 }
 
 const execFileAsync = promisify(execFile);
@@ -139,10 +146,10 @@ Commands:
   reply <comment-id> --body <text>
       Post a reply to a review comment thread
 
-  unresolved
+  unresolved [--phase <code|qa>]
       Show unresolved thread count
 
-  threads
+  threads [--phase <code|qa>]
       Print formatted thread state (same view the agent gets)
 
   diff
@@ -772,7 +779,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
           process.exit(1);
         }
         let data: {
-          comments: Array<{ path: string; line: number; body: string }>;
+          comments: Array<{ path: string | null; line: number | null; body: string }>;
           summary: string;
           event?: "COMMENT" | "REQUEST_CHANGES" | "APPROVE";
         };
@@ -795,13 +802,13 @@ export async function main(argv: string[] = process.argv): Promise<void> {
           if (comments.length > 0) {
             event = "REQUEST_CHANGES";
           } else {
-            unresolvedCount = await backend.fetchUnresolvedThreadCount(pr);
+            unresolvedCount = await backend.fetchUnresolvedThreadCount(pr, phase);
             event = unresolvedCount > 0 ? "COMMENT" : "APPROVE";
           }
         }
         const passLabel = passLabelForPhase(phase);
         const persistedEvent = event === "APPROVE" ? "COMMENT" : event;
-        await backend.postReview(pr, comments, data.summary ?? "", persistedEvent);
+        await backend.postReview(pr, comments, data.summary ?? "", persistedEvent, phase);
 
         // Set label based on outcome (reuse cached unresolved count)
         if (comments.length > 0) {
@@ -809,7 +816,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
           await backend.setLabel(pr, "bot-changes-needed");
           console.log(`Posted review with ${comments.length} comment(s). Label: bot-changes-needed`);
         } else {
-          unresolvedCount ??= await backend.fetchUnresolvedThreadCount(pr);
+          unresolvedCount ??= await backend.fetchUnresolvedThreadCount(pr, phase);
           if (event !== "APPROVE" || unresolvedCount > 0) {
             await backend.removePassLabel(pr, passLabel);
             await backend.setLabel(pr, "bot-changes-needed");
@@ -862,15 +869,25 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     }
 
     case "unresolved": {
-      const count = await backend.fetchUnresolvedThreadCount(pr);
-      const resolved = await backend.fetchResolvedThreadIds(pr);
+      const phase = parseReviewPhase(flags["phase"]);
+      if (flags["phase"] && !phase) {
+        console.error("Usage: ironsha-state unresolved [--phase <code|qa>]");
+        process.exit(1);
+      }
+      const count = await backend.fetchUnresolvedThreadCount(pr, phase);
+      const resolved = await backend.fetchResolvedThreadIds(pr, phase);
       console.log(`Unresolved: ${count}`);
       console.log(`Resolved:   ${resolved.size}`);
       break;
     }
 
     case "threads": {
-      const formatted = await backend.formatThreadStateForAgent(pr);
+      const phase = parseReviewPhase(flags["phase"]);
+      if (flags["phase"] && !phase) {
+        console.error("Usage: ironsha-state threads [--phase <code|qa>]");
+        process.exit(1);
+      }
+      const formatted = await backend.formatThreadStateForAgent(pr, phase);
       console.log(formatted);
       break;
     }

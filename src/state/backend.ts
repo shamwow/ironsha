@@ -1,5 +1,7 @@
 import type { ReviewComment, PRInfo } from "../review/types.js";
 
+export type ReviewPhase = "code" | "qa";
+
 export interface FilePatch {
   filename: string;
   patch?: string;
@@ -15,6 +17,7 @@ export interface StateBackend {
     comments: ReviewComment[],
     summary: string,
     event: "COMMENT" | "REQUEST_CHANGES" | "APPROVE",
+    phase?: ReviewPhase,
   ): Promise<void>;
   replyToThread(pr: PRInfo, threadId: string, body: string): Promise<void>;
 
@@ -23,12 +26,12 @@ export interface StateBackend {
 
   // Reactions / thread resolution
   addResolvedReactions(pr: PRInfo, commentId: string): Promise<void>;
-  fetchResolvedThreadIds(pr: PRInfo): Promise<Set<string>>;
-  fetchUnresolvedThreadCount(pr: PRInfo): Promise<number>;
+  fetchResolvedThreadIds(pr: PRInfo, phase?: ReviewPhase): Promise<Set<string>>;
+  fetchUnresolvedThreadCount(pr: PRInfo, phase?: ReviewPhase): Promise<number>;
 
   // Labels
   setLabel(pr: PRInfo, label: string): Promise<void>;
 
   // Agent context — how to tell the agent about existing threads
-  formatThreadStateForAgent(pr: PRInfo): Promise<string>;
+  formatThreadStateForAgent(pr: PRInfo, phase?: ReviewPhase): Promise<string>;
 }

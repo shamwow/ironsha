@@ -28,7 +28,7 @@ test("LocalStateBackend persists general comments as resolvable threads", async 
       { path: "src/task.txt", line: 1, body: "Inline finding." },
     ];
 
-    await backend.postReview(pr, comments, "Summary", "COMMENT");
+    await backend.postReview(pr, comments, "Summary", "COMMENT", "qa");
 
     const state = backend.getState();
     assert.equal(state.reviews.length, 1);
@@ -36,18 +36,59 @@ test("LocalStateBackend persists general comments as resolvable threads", async 
     assert.equal(state.reviews[0].comments[0].path, null);
     assert.equal(state.reviews[0].comments[0].line, null);
 
-    assert.equal(await backend.fetchUnresolvedThreadCount(pr), 2);
+    assert.equal(await backend.fetchUnresolvedThreadCount(pr, "qa"), 2);
 
     const generalThreadId = state.reviews[0].comments[0].id;
     await backend.replyToThread(pr, generalThreadId, "Addressed");
     await backend.addResolvedReactions(pr, generalThreadId);
 
-    assert.equal(await backend.fetchUnresolvedThreadCount(pr), 1);
+    assert.equal(await backend.fetchUnresolvedThreadCount(pr, "qa"), 1);
 
-    const threadState = await backend.formatThreadStateForAgent(pr);
+    const threadState = await backend.formatThreadStateForAgent(pr, "qa");
     assert.match(threadState, /general comment/);
     assert.match(threadState, /RESOLVED/);
     assert.match(threadState, /Reply: Addressed/);
+  } finally {
+    rmSync(checkoutPath, { recursive: true, force: true });
+  }
+});
+
+test("LocalStateBackend filters unresolved threads by review phase", async () => {
+  const { backend, pr, checkoutPath } = createBackend();
+  try {
+    await backend.postReview(
+      pr,
+      [{ path: "src/code.txt", line: 1, body: "Code issue." }],
+      "Code summary",
+      "REQUEST_CHANGES",
+      "code",
+    );
+    await backend.postReview(
+      pr,
+      [{ path: null, line: null, body: "QA issue." }],
+      "QA summary",
+      "REQUEST_CHANGES",
+      "qa",
+    );
+
+    const state = backend.getState();
+    assert.equal(state.reviews[0].phase, "code");
+    assert.equal(state.reviews[1].phase, "qa");
+    assert.equal(await backend.fetchUnresolvedThreadCount(pr, "code"), 1);
+    assert.equal(await backend.fetchUnresolvedThreadCount(pr, "qa"), 1);
+    assert.equal(await backend.fetchUnresolvedThreadCount(pr), 2);
+
+    await backend.addResolvedReactions(pr, state.reviews[0].comments[0].id);
+
+    assert.equal(await backend.fetchUnresolvedThreadCount(pr, "code"), 0);
+    assert.equal(await backend.fetchUnresolvedThreadCount(pr, "qa"), 1);
+
+    const codeThreadState = await backend.formatThreadStateForAgent(pr, "code");
+    const qaThreadState = await backend.formatThreadStateForAgent(pr, "qa");
+    assert.match(codeThreadState, /Code issue/);
+    assert.doesNotMatch(codeThreadState, /QA issue/);
+    assert.match(qaThreadState, /QA issue/);
+    assert.doesNotMatch(qaThreadState, /Code issue/);
   } finally {
     rmSync(checkoutPath, { recursive: true, force: true });
   }

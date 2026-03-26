@@ -760,7 +760,7 @@ async function runReviewFixLoop(cwd: string, config: ReviewLoopConfig): Promise<
     log(config.logPhase, `--- Cycle ${cycle} ---`);
 
     log(config.logPhase, "Running review...");
-    const threadState = runStateCmd(cwd, ["threads"]);
+    const threadState = runStateCmd(cwd, ["threads", "--phase", config.reviewPhaseFlag]);
     const reviewOutput = await runAgenticMode(
       config.reviewLlm,
       config.reviewPrompt(threadState),
@@ -789,7 +789,7 @@ async function runReviewFixLoop(cwd: string, config: ReviewLoopConfig): Promise<
     }
 
     log(config.logPhase, "Running fix pass...");
-    const fixThreadState = runStateCmd(cwd, ["threads"]);
+    const fixThreadState = runStateCmd(cwd, ["threads", "--phase", config.reviewPhaseFlag]);
     const fixOutput = await runAgenticMode(
       config.reviewLlm,
       config.fixPrompt(fixThreadState),

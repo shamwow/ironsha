@@ -4,7 +4,7 @@ import { mkdir, rename, writeFile, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { ReviewComment, PRInfo } from "../review/types.js";
-import type { StateBackend, FilePatch } from "../state/backend.js";
+import type { StateBackend, FilePatch, ReviewPhase } from "../state/backend.js";
 import type {
   LocalPRState,
   LocalReview,
@@ -98,6 +98,7 @@ export class LocalStateBackend implements StateBackend {
     comments: ReviewComment[],
     summary: string,
     event: "COMMENT" | "REQUEST_CHANGES" | "APPROVE",
+    phase: ReviewPhase = "code",
   ): Promise<void> {
     const now = new Date().toISOString();
     const persistedComments: LocalReviewComment[] = comments
@@ -114,6 +115,7 @@ export class LocalStateBackend implements StateBackend {
 
     const review: LocalReview = {
       id: randomUUID(),
+      phase,
       body: summary,
       event,
       author: BOT_LOGIN,
@@ -180,9 +182,18 @@ export class LocalStateBackend implements StateBackend {
     logger.warn({ commentId }, "Could not find comment to add reactions to");
   }
 
-  async fetchResolvedThreadIds(_pr: PRInfo): Promise<Set<string>> {
+  private getReviewPhase(review: LocalReview): ReviewPhase {
+    return review.phase ?? "code";
+  }
+
+  private matchesPhase(review: LocalReview, phase?: ReviewPhase): boolean {
+    return !phase || this.getReviewPhase(review) === phase;
+  }
+
+  async fetchResolvedThreadIds(_pr: PRInfo, phase?: ReviewPhase): Promise<Set<string>> {
     const resolved = new Set<string>();
     for (const review of this.state.reviews) {
+      if (!this.matchesPhase(review, phase)) continue;
       for (const comment of review.comments) {
         if (comment.author !== BOT_LOGIN) continue;
         const hasRocket = comment.reactions.some(
@@ -199,10 +210,11 @@ export class LocalStateBackend implements StateBackend {
     return resolved;
   }
 
-  async fetchUnresolvedThreadCount(_pr: PRInfo): Promise<number> {
-    const resolved = await this.fetchResolvedThreadIds(_pr);
+  async fetchUnresolvedThreadCount(_pr: PRInfo, phase?: ReviewPhase): Promise<number> {
+    const resolved = await this.fetchResolvedThreadIds(_pr, phase);
     let total = 0;
     for (const review of this.state.reviews) {
+      if (!this.matchesPhase(review, phase)) continue;
       for (const comment of review.comments) {
         if (comment.author === BOT_LOGIN) total++;
       }
@@ -246,11 +258,12 @@ export class LocalStateBackend implements StateBackend {
     await this.persist();
   }
 
-  async formatThreadStateForAgent(_pr: PRInfo): Promise<string> {
+  async formatThreadStateForAgent(_pr: PRInfo, phase?: ReviewPhase): Promise<string> {
     const lines: string[] = [];
 
-    const resolved = await this.fetchResolvedThreadIds(_pr);
+    const resolved = await this.fetchResolvedThreadIds(_pr, phase);
     for (const review of this.state.reviews) {
+      if (!this.matchesPhase(review, phase)) continue;
       for (const comment of review.comments) {
         const status = resolved.has(comment.id) ? "RESOLVED" : "UNRESOLVED";
         const location = comment.path !== null && comment.line !== null

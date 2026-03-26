@@ -135,13 +135,13 @@ export async function runReviewPipelineCore(
     });
 
     // Pre-fetch resolved thread IDs
-    const resolvedThreadIds = await backend.fetchResolvedThreadIds(pr);
+    const resolvedThreadIds = await backend.fetchResolvedThreadIds(pr, "code");
 
     const resolvedLine = resolvedThreadIds.size > 0
       ? `Already-resolved thread IDs (skip these): ${[...resolvedThreadIds].join(", ")}`
       : `No threads are currently marked as resolved.`;
 
-    const threadContext = await backend.formatThreadStateForAgent(pr);
+    const threadContext = await backend.formatThreadStateForAgent(pr, "code");
 
     const userMessage = [
       `Review PR #${pr.number} in ${pr.owner}/${pr.repo}.`,
@@ -264,6 +264,7 @@ export async function runReviewPipelineCore(
         commentsWithFooter,
         merged.summary + makeFooter(randomUUID(), reviewId, "reviewer"),
         "REQUEST_CHANGES",
+        "code",
       );
     }
 
@@ -281,7 +282,7 @@ export async function runReviewPipelineCore(
 
     // Safety check: verify the agent didn't miss unresolved threads
     if (!hasUnresolved && !hasNewComments) {
-      const unresolvedOnPR = await backend.fetchUnresolvedThreadCount(pr);
+      const unresolvedOnPR = await backend.fetchUnresolvedThreadCount(pr, "code");
       if (unresolvedOnPR > 0) {
         log.warn(
           { unresolvedOnPR },

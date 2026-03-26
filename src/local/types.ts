@@ -37,6 +37,7 @@ export interface LocalReviewComment {
 
 export interface LocalReview {
   id: string;
+  phase: "code" | "qa";
   body: string;
   event: "COMMENT" | "REQUEST_CHANGES" | "APPROVE";
   author: string;
