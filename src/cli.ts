@@ -42,7 +42,7 @@ interface OrchestrateOptions {
 
 const DEFAULT_LLM: LlmConfig = { provider: "claude", model: "claude-opus-4-6" };
 const VALID_PROVIDERS = ["claude", "codex"] as const;
-const MAX_TURNS = 100;
+const MAX_TURNS = 50;
 
 const USAGE = `Usage: ironsha build "<task description>" [options]
 
